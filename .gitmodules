@@ -1,0 +1,3 @@
+[submodule "MaaSSim"]
+	path = MaaSSim
+	url = https://github.com/Arjan-de-R/MaaSSim
