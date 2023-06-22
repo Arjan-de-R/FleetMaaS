@@ -1,4 +1,4 @@
-name: fleetpy
+name: fleetmaas
 channels:
   - gurobi
   - conda-forge
