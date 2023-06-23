@@ -7,7 +7,7 @@ import geopandas as gpd
 dev_p = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.append(dev_p)
 
-from dev.preprocessing.networks.network_manipulation import FullNetwork
+from FleetPy.dev.preprocessing.networks.network_manipulation import FullNetwork
 
 def create_network_from_graphml(graphml_file, network_name):
     """ this function reads the graphml file and creates fleetpy network files

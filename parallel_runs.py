@@ -11,6 +11,7 @@ params.paths.G = 'data/graphs/Amsterdam.graphml'
 params.paths.skim = 'data/graphs/Amsterdam.csv'
 params.paths.albatross = 'data/albatross'
 params.study_name = 'cmpt_trb_24'
+params.fleetpy_config_name = 'constant_config_competition'
 
 # Main experimental settings
 params.nP = 1000 # travellers

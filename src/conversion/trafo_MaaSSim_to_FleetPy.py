@@ -2,7 +2,7 @@ import os
 import datetime as dt
 import pandas as pd
 
-from src.misc.globals import *
+from FleetPy.src.misc.globals import *
 
 
 def _create_seconds_of_day(dt_str):
@@ -20,14 +20,13 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     :param new_wd_scenario_name: scenario name of next within-day simulation
     """
     # 1) create demand data set
-    rq_f = os.path.join(dtd_result_dir, "demand", "inData_requests.csv")
+    rq_f = os.path.join(dtd_result_dir, "inData_requests.csv")
     rq_df = pd.read_csv(rq_f, index_col=0)
     rq_df.index.name = "rq_id"
-    pax_f = os.path.join(dtd_result_dir, "demand", "inData_passengers.csv")
+    pax_f = os.path.join(dtd_result_dir, "inData_passengers.csv")
     pax_df = pd.read_csv(pax_f, index_col=0)
     c_df = pd.merge(rq_df, pax_df, left_on="pax_id", right_index=True)
-    # TODO # Arjan: remove [] from current d2d output format
-    f_df = c_df.loc[c_df["platforms"] != ""].reset_index()
+    f_df = c_df.loc[c_df["platforms"] > 0].reset_index()
     fpy_rq_df = f_df[["rq_id", "treq", "origin", "destination", "platforms"]]
     fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
     fpy_rq_df.rename({"rq_id": "request_id", "origin": "start", "destination": "end"}, axis=1, inplace=True)
@@ -38,7 +37,6 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         raise EnvironmentError("Network file has no information of source ids (source_node_id entry missing in nodes.csv) -> no conversion possible!")
     nodes_df.set_index("source_node_id", inplace=True)
     source_to_node_id = nodes_df["node_index"].to_dict()
-    # TODO # RE/FD: is FleetPy okay with unordered request ids? -> should be -> it is
     fpy_rq_f = os.path.join(fleetpy_dir, "data", "demand", fleetpy_study_name)
     if not os.path.isdir(fpy_rq_f):
         os.mkdir(fpy_rq_f)
@@ -53,7 +51,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
 
     # 2) create driver/vehicle data file
     # TODO # specification of input file and codes for initialization (and rest)
-    driver_f = os.path.join(dtd_result_dir, "vehicles", "inData_vehicles.csv")
+    driver_f = os.path.join(dtd_result_dir, "inData_vehicles.csv")
     driver_df = pd.read_csv(driver_f, index_col=0)
     driver_df.index.name = "driver_id"
     print(driver_df.head())

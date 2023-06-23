@@ -19,10 +19,11 @@ from MaaSSim.MaaSSim.decisions import dummy_False
 from src.conversion.create_network_from_graphml import *
 from src.conversion.trafo_FleetPy_to_MaaSSim import *
 from src.conversion.trafo_MaaSSim_to_FleetPy import *
+from d2d.supply import *
 import os.path
 import zipfile
 import json
-from FleetPy.run_examples import run_scenarios
+from FleetPy.run_examples import run_single_simulation
 
 # import functions from FleetPy
 # import functions from FleetMaaS - conversion scripts
@@ -47,16 +48,16 @@ def single_pararun(one_slice, *args):
         else:
             _params[key] = val
 
-    stamp['dt'] = str(pd.Timestamp.now()).replace('-','').replace('.','').replace(' ','')
+    # stamp['dt'] = str(pd.Timestamp.now()).replace('-','').replace('.','').replace(' ','')
 
-    filename = ''
+    scn_name = ''
     for key, value in stamp.items():
-        filename += '-{}_{}'.format(key, value)
-    filename = re.sub('[^-a-zA-Z0-9_.() ]+', '', filename)
+        scn_name += '-{}_{}'.format(key, value)
+    scn_name = re.sub('[^-a-zA-Z0-9_.() ]+', '', scn_name)
 
-    sim = simulate(inData=_inData, params=_params, logger_level=logging.WARNING, filename = filename)
+    sim = simulate(inData=_inData, params=_params, logger_level=logging.WARNING, scn_name = scn_name)
 
-    print(filename, pd.Timestamp.now(), 'end')
+    print(scn_name, pd.Timestamp.now(), 'end')
     return 0
 
 
@@ -147,14 +148,18 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.vehicles = fixed_supply.copy()
     
     # Determine which platform agents can use
-    inData.vehicles.platform = inData.vehicles.apply(lambda x: 0, axis = 1)  # TODO: allow for multiple platforms
-    inData.passengers.platforms = inData.passengers.apply(lambda x: [0], axis = 1)
-    inData.requests['platform'] = inData.requests.apply(lambda row: inData.passengers.loc[row.name].platforms[0], axis = 1)
+    inData.vehicles.platform = 100 #inData.vehicles.apply(lambda x: 100, axis = 1)  # TODO: set multi-homing or single-homing per agent, now we assume everybody multi-homes
+    inData.passengers.platforms = 100 #inData.passengers.apply(lambda x: 100, axis = 1) # TODO: same
+    inData.requests['platform'] = 100 #inData.requests.apply(lambda row: inData.passengers.loc[row.name].platforms[0], axis = 1) # TODO: same
 
     # Set properties of platform(s)
     inData.platforms = pd.concat([inData.platforms,pd.DataFrame(columns=['base_fare','comm_rate','min_fare'])])
     inData.platforms = initialize_df(inData.platforms)
     inData.platforms.loc[0]=[params.platforms.fare,'Uber',30,params.platforms.base_fare,params.platforms.comm_rate,params.platforms.min_fare,]
+
+    # Load path
+    if path is None:
+        path = os.getcwd()
 
     # Prepare schedule for shared rides and the within-day simulator
     inData = prep_shared_rides(inData, params.shareability)  # prepare schedules
@@ -166,26 +171,29 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
                     f_trav_out = d2d_no_request,
                     f_trav_mode = dummy_False, **kwargs)  # initialize
     if params.get('wd_simulator', 'MaaSSim') == 'FleetPy':
+        # Initialise FleetPy
+        fleetpy_dir = os.path.join(path, 'FleetPy')
+        fleetpy_study_name = params.get('study_name', 'MaaSSim_FleetPy')
+        config_name = params.fleetpy_config_name
         graphml_file = params.paths.G
         network_name = params.city.split(",")[0]
         create_network_from_graphml(graphml_file, network_name) # create FleetPy network files
+        constant_config_file = pd.read_csv(os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios'),{}.format(config_name))
 
-    # Where will results be stored
-    filename = kwargs.get('filename')
-    if path is None:
-        path = os.getcwd()
-    sim_zip = zipfile.ZipFile(os.path.join(path, '{}.zip'.format(filename)), 'w')
+    # Where will the (final) results of the day-to-day simulation be stored
+    scn_name = kwargs.get('scn_name')
+    sim_zip = zipfile.ZipFile(os.path.join(path, 'res', '{}.zip'.format(scn_name)), 'w')
     params.t0 = str(params.t0)
-    with open('params_{}.json'.format(filename), 'w') as file:
+    with open('params_{}.json'.format(scn_name), 'w') as file:
         json.dump(params, file)
-    sim_zip.write('params_{}.json'.format(filename))
-    os.remove('params_{}.json'.format(filename))
+    sim_zip.write('params_{}.json'.format(scn_name))
+    os.remove('params_{}.json'.format(scn_name))
     df_req = inData.requests[['pax_id','origin','destination','treq','dist','haver_dist']]
     df_pax = inData.passengers[['VoT','U_car','U_pt','U_bike']]
     df = pd.concat([df_req, df_pax], axis=1)
-    sim_zip.writestr("requests.csv", df.to_csv())
+    # sim_zip.writestr("requests.csv", df.to_csv()) 
     # sim_zip.writestr("PT_itineraries.csv", inData.pt_itinerary.to_csv())
-    sim_zip.writestr("vehicles.csv", inData.vehicles[['pos','res_wage']].to_csv())
+    # sim_zip.writestr("vehicles.csv", inData.vehicles[['pos','res_wage']].to_csv())
     sim_zip.writestr("platforms.csv", inData.platforms.to_csv())
     sim_zip.writestr("all_pax.csv", all_pax.to_csv())
     evol_micro = init_d2d_dotmap()
@@ -203,18 +211,29 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             sim.last_res = sim.res[day].copy() # create a copy of the results - saved later
             del sim.res[day]
         if params.get('wd_simulator', 'MaaSSim') == 'FleetPy':
+            # Pre-day work choice
+            inData.vehicles = work_preday(inData.vehicles)
+
+            # Generate input csv's for FleetPy
+            dtd_result_dir = os.path.join(path, 'res/d2d','{}'.format(scn_name))
+            inData.requests.to_csv(os.path.join(dtd_result_dir,'requests.csv'))
+            inData.passengers.to_csv(os.path.join(dtd_result_dir,'passengers.csv')) 
+            inData.vehicles.to_csv(os.path.join(dtd_result_dir,'vehicles.csv')) 
+
             # FleetPy init: conversion from MaaSSim data structure
-            dtd_result_dir = 9999 #TODO
-            fleetpy_dir = os.path.join(path, 'FleetPy')
-            fleetpy_study_name = params.get('study_name', 'MaaSSim_FleetPy')
-            new_wd_scenario_name = 9999 #TODO
-            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, new_wd_scenario_name)
+            day_name = scn_name + '_day_{}'.format(day) # id in FleetPy
+            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, day_name)
 
             # Run FleetPy model
+            scn_file = pd.read_csv(os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{day_name}.csv"), index=False)
+            scenario_parameters = scn_file.merge(constant_config_file, how='left', on='Input_Parameter_Name')
+            
             # constant_config_file: setup operator 1 = hailing, op_2 = pooling (dep. on scenario), max. waiting time (everything that will remain constant), SCENARIO-SPECIFIC
             # new_wd_scenario_name: everything that changes from sim to sim
-            run_scenarios(constant_config_file, new_wd_scenario_name, n_parallel_sim=1, n_cpu_per_sim=1, evaluate=1, log_level="info",
-                  keep_old=False, continue_next_after_error=False)
+            run_single_simulation(scenario_parameters)
+            print('Lets see if this works')
+            #run_scenarios(constant_config_file, scn_file, n_parallel_sim=1, n_cpu_per_sim=1, evaluate=1, log_level="info",
+                #   keep_old=False, continue_next_after_error=False)
 
             # FleetPy results
 
