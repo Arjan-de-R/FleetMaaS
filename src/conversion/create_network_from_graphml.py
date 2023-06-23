@@ -7,7 +7,9 @@ import geopandas as gpd
 dev_p = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.append(dev_p)
 
-from FleetPy.dev.preprocessing.networks.network_manipulation import FullNetwork
+from FleetPy.src.preprocessing.networks.network_manipulation import FullNetwork
+from FleetPy.src.preprocessing.networks.create_travel_time_tables import create_travel_time_table
+
 
 def create_network_from_graphml(graphml_file, network_name):
     """ this function reads the graphml file and creates fleetpy network files
@@ -97,6 +99,9 @@ def create_network_from_graphml(graphml_file, network_name):
     nw.storeNewFullNetwork(os.path.join(dev_p, "FleetPy", "data", "networks"), network_name)
     
     nw.plotNetwork()
+
+    network_dir = os.path.join(dev_p, "FleetPy", "data", "networks", network_name)
+    create_travel_time_table(network_dir, scenario_time=None, save_npy=True, save_csv=False)
     
 
 if __name__ == "__main__":

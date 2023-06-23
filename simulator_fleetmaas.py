@@ -177,7 +177,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         config_name = params.fleetpy_config_name
         graphml_file = params.paths.G
         network_name = params.city.split(",")[0]
-        create_network_from_graphml(graphml_file, network_name) # create FleetPy network files
+        #create_network_from_graphml(graphml_file, network_name) # create FleetPy network files as preprocessing
         constant_config_file = pd.read_csv(os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios'),{}.format(config_name))
 
     # Where will the (final) results of the day-to-day simulation be stored

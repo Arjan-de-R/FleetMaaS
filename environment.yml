@@ -184,3 +184,4 @@ dependencies:
     - pyqt6-qt6==6.5.0
     - pyqt6-sip==13.5.1
     - pyqtwebengine==5.12.1
+    - simpy==3.0.11
