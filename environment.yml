@@ -114,6 +114,7 @@ dependencies:
   - olefile=0.46=pyh9f0ad1d_1
   - openjpeg=2.3.1=h48faf41_3
   - openssl=1.1.1q=h8ffe710_0
+  - osmnx=0.16.2=pyhd3deb0d_0
   - pandas=1.2.0=py37h08fd248_1
   - parso=0.8.1=pyhd8ed1ab_0
   - pcre=8.44=ha925a31_0
