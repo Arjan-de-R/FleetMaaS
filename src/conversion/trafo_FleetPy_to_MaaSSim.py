@@ -205,4 +205,4 @@ def update_d2d_drivers_fleetpy(*args, **kwargs):
 
 
 def transform_wd_output_to_d2d_input():
-    '''This function transforms the output files of the within-day model (FleetPy) for the day-to-day (MaaSSim) model
+    '''This function transforms the output files of the within-day model (FleetPy) for the day-to-day (MaaSSim) model'''

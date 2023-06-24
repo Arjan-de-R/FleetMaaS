@@ -19,7 +19,7 @@ from MaaSSim.MaaSSim.decisions import dummy_False
 from src.conversion.create_network_from_graphml import *
 from src.conversion.trafo_FleetPy_to_MaaSSim import *
 from src.conversion.trafo_MaaSSim_to_FleetPy import *
-from d2d.supply import *
+from src.d2d.supply import *
 import os.path
 import zipfile
 import json
@@ -61,7 +61,7 @@ def single_pararun(one_slice, *args):
     return 0
 
 
-def simulate_parallel(config="../data/config/parallel.json", inData=None, params=None, search_space=None, **kwargs):
+def simulate_parallel(config="MaaSSim/data/config/parallel.json", inData=None, params=None, search_space=None, **kwargs):
     if inData is None:  # otherwise we use what is passed
         from MaaSSim.MaaSSim.data_structures import structures
         inData = structures.copy()  # fresh data
@@ -119,7 +119,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData = load_albatross_proc(inData, params, avg_speed = True)
         inData.requests = inData.requests.drop(['orig_geo', 'dest_geo', 'origin_y', 'origin_x', 'destination_y', 'destination_x', 'time'], axis = 1)
         inData = sample_from_alba(inData, params)
-        inData.passengers = prefs_travs(inData, params)
+    else:
+        inData = generate_demand(inData, params, avg_speed = True)
+    inData.passengers = prefs_travs(inData, params)
 
     # Load processed Albatross file, the OTP result, and compute PT fares
     # inData.pt_itinerary = load_OTP_result(params)
@@ -174,23 +176,25 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Initialise FleetPy
         fleetpy_dir = os.path.join(path, 'FleetPy')
         fleetpy_study_name = params.get('study_name', 'MaaSSim_FleetPy')
-        config_name = params.fleetpy_config_name
-        graphml_file = params.paths.G
+        config_file = params.fleetpy_config
+        # graphml_file = params.paths.G
         network_name = params.city.split(",")[0]
-        #create_network_from_graphml(graphml_file, network_name) # create FleetPy network files as preprocessing
-        constant_config_file = pd.read_csv(os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios'),{}.format(config_name))
+        # create_network_from_graphml(graphml_file, network_name) # used only for preprocessing
+        constant_config_file = pd.read_csv(os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file)))
 
-    # Where will the (final) results of the day-to-day simulation be stored
+    # Where are the (final) results of the day-to-day simulation be stored
     scn_name = kwargs.get('scn_name')
-    sim_zip = zipfile.ZipFile(os.path.join(path, 'res', '{}.zip'.format(scn_name)), 'w')
+    sim_zip = zipfile.ZipFile(os.path.join(path, 'results', '{}.zip'.format(scn_name)), 'w')
     params.t0 = str(params.t0)
     with open('params_{}.json'.format(scn_name), 'w') as file:
         json.dump(params, file)
     sim_zip.write('params_{}.json'.format(scn_name))
     os.remove('params_{}.json'.format(scn_name))
-    df_req = inData.requests[['pax_id','origin','destination','treq','dist','haver_dist']]
-    df_pax = inData.passengers[['VoT','U_car','U_pt','U_bike']]
-    df = pd.concat([df_req, df_pax], axis=1)
+    # df_req = inData.requests[['pax_id','origin','destination','treq','dist']]
+    # if 'haver_dist' in inData.requests.columns:
+        # df_req['haver_dist'] = inData.requests['haver_dist']
+    # df_pax = inData.passengers[['VoT','U_car','U_pt','U_bike']]
+    # df = pd.concat([df_req, df_pax], axis=1)
     # sim_zip.writestr("requests.csv", df.to_csv()) 
     # sim_zip.writestr("PT_itineraries.csv", inData.pt_itinerary.to_csv())
     # sim_zip.writestr("vehicles.csv", inData.vehicles[['pos','res_wage']].to_csv())
@@ -212,13 +216,16 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             del sim.res[day]
         if params.get('wd_simulator', 'MaaSSim') == 'FleetPy':
             # Pre-day work choice
-            inData.vehicles = work_preday(inData.vehicles)
+            inData.vehicles = work_preday(inData.vehicles, params)
 
             # Generate input csv's for FleetPy
-            dtd_result_dir = os.path.join(path, 'res/d2d','{}'.format(scn_name))
-            inData.requests.to_csv(os.path.join(dtd_result_dir,'requests.csv'))
-            inData.passengers.to_csv(os.path.join(dtd_result_dir,'passengers.csv')) 
-            inData.vehicles.to_csv(os.path.join(dtd_result_dir,'vehicles.csv')) 
+            dtd_result_dir = os.path.join(path, 'temp_res','{}'.format(scn_name))
+            if not os.path.exists(dtd_result_dir):
+                os.mkdir(dtd_result_dir)
+            inData.requests.to_csv(os.path.join(dtd_result_dir,'inData_requests.csv'))
+            inData.passengers.to_csv(os.path.join(dtd_result_dir,'inData_passengers.csv')) 
+            inData.vehicles.to_csv(os.path.join(dtd_result_dir,'inData_vehicles.csv')) 
+            inData.platforms.to_csv(os.path.join(dtd_result_dir,'inData_platforms.csv')) 
 
             # FleetPy init: conversion from MaaSSim data structure
             day_name = scn_name + '_day_{}'.format(day) # id in FleetPy

@@ -4,14 +4,14 @@ from MaaSSim.MaaSSim.utils import save_config, get_config, load_G, generate_dema
 from MaaSSim.MaaSSim.d2d_sim import *
 sys.path.append('..')
 
-params = get_config('data/config/ams_2B.json')
+params = get_config('MaaSSim/data/config/Delft.json')
 params.parallel.nThread = 1
 params.parallel.nReplications = 1
-params.paths.G = 'data/graphs/Amsterdam.graphml'
-params.paths.skim = 'data/graphs/Amsterdam.csv'
-params.paths.albatross = 'data/albatross'
-params.study_name = 'cmpt_trb_24'
-params.fleetpy_config_name = 'constant_config_competition'
+params.paths.G = 'MaaSSim/data/graphs/Delft.graphml'
+params.paths.skim = 'MaaSSim/data/graphs/Delft.csv'
+params.paths.albatross = 'MaaSSim/data/albatross'
+params.study_name = 'competition_trb24'
+params.fleetpy_config = 'constant_config.csv'
 
 # Main experimental settings
 params.nP = 1000 # travellers
@@ -77,7 +77,7 @@ params.speeds.bike = (1/2.5) * params.speeds.ride # m/s
 
 # Demand settings
 params.dist_threshold_min = 2000 # min dist
-params.albatross = True  # if False, demand is artificially generated
+params.albatross = False  # if False, demand is artificially generated
 
 # Regulation settings
 params.platforms.reg_cap = np.inf

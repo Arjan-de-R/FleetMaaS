@@ -96,11 +96,11 @@ def create_network_from_graphml(graphml_file, network_name):
     
     nw = FullNetwork(None, nodes_gdf=nodes_gdf, edges_gdf=edges_gdf)
     
-    nw.storeNewFullNetwork(os.path.join(dev_p, "FleetPy", "data", "networks"), network_name)
+    nw.storeNewFullNetwork(os.path.join(dev_p, "FleetMaaS", "FleetPy", "data", "networks"), network_name)
     
     nw.plotNetwork()
 
-    network_dir = os.path.join(dev_p, "FleetPy", "data", "networks", network_name)
+    network_dir = os.path.join(dev_p, "FleetMaaS", "FleetPy", "data", "networks", network_name)
     create_travel_time_table(network_dir, scenario_time=None, save_npy=True, save_csv=False)
     
 

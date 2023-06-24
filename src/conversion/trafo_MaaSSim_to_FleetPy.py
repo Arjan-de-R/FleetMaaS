@@ -79,7 +79,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     #driver_id,veh_type,possible_operators
 
     # 3) create scenario input file
-    platform_df = pd.read_csv(os.path.join(dtd_result_dir, "platforms", "inData_platforms.csv"))
+    platform_df = pd.read_csv(os.path.join(dtd_result_dir, "inData_platforms.csv"))
     nr_platforms = platform_df.shape[0]
     op_min_fares = ";".join([str(x) for x in platform_df["min_fare"].values])
     op_base_fares = ";".join([str(x) for x in platform_df["base_fare"].values])
