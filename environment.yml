@@ -180,6 +180,7 @@ dependencies:
   - zstd=1.4.9=h6255e5f_0
   - pip:
     - dotmap==1.2.20
+    - exmas==0.9.99
     - pyqt5-sip==4.19.18
     - pyqt6==6.5.0
     - pyqt6-qt6==6.5.0
