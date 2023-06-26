@@ -196,8 +196,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         fleetpy_dir = os.path.join(path, 'FleetPy')
         fleetpy_study_name = params.get('study_name', 'MaaSSim_FleetPy')
         config_file = params.fleetpy_config
-        # graphml_file = params.paths.G
         network_name = params.city.split(",")[0]
+        demand_name = network_name
+        # graphml_file = params.paths.G
         # create_network_from_graphml(graphml_file, network_name) # used only for preprocessing
         constant_config_file = os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file))
 
@@ -248,7 +249,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
             # FleetPy init: conversion from MaaSSim data structure
             day_name = scn_name + '_day_{}'.format(day) # id in FleetPy
-            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, day_name)
+            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, day_name, demand_name)
 
             # Run FleetPy model
             scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{day_name}.csv")
