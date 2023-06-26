@@ -16,9 +16,24 @@ params.fleetpy_config = 'constant_config.csv'
 # Main experimental settings
 params.nP = 1000 # travellers
 params.nV = 50 # drivers
+params.nS = 2 # number of service providers
 params.nD = 3 # days
 params.simTime = 8 # hours
 params.wd_simulator = 'FleetPy'
+
+# Platform settings - platform 0
+params.platforms.base_fare = 1.5 #euro
+params.platforms.fare = 1.5 #euro/km
+params.platforms.min_fare = 0 # euro
+params.platforms.comm_rate = 0.25 #rate
+params.platforms.max_wait_time = 600 # maximum time from assignment to pick-up allowed by platform
+params.platforms.match_obj = 'total_system_time'
+params.platforms.max_rel_detour = 40 # if pooling is not allowed, this is set to 0 (with non-zero additional boarding time preventing pooling for identical trip requests)
+
+# Platform settings - platform 1 (if not specified, the same as platform 0)
+params.platforms.fare_1 = 1.5 #euro/km #1.63
+params.platforms.comm_rate_1 = 0.25 #rate
+params.platforms.max_rel_detour_1 = 40 # if pooling is not allowed, this is set to 0 (with non-zero additional boarding time preventing pooling for identical trip requests)
 
 # Other day-to-day settings
 params.evol.drivers.kappa = 0.2
@@ -58,13 +73,6 @@ params.evol.travellers.mode_pref.ASC_pt_sd = 0  # 1.31
 params.evol.travellers.mode_pref.ASC_bike_sd = 0  # 2.35
 params.evol.travellers.mode_pref.gini = params.evol.drivers.gini
 
-# Financial settings
-params.platforms.base_fare = 1.5 #euro  #1.4
-params.platforms.fare = 1.5 #euro/km #1.63
-params.platforms.min_fare = 0 # euro
-params.platforms.comm_rate = 0.25 #rate
-params.drivers.fuel_costs = 0.25 #euro/km
-
 # Properties alternative modes
 params.alt_modes.pt.base_fare = 0.99 # euro
 params.alt_modes.pt.km_fare = 0.174 # euro/km
@@ -78,6 +86,9 @@ params.speeds.bike = (1/2.5) * params.speeds.ride # m/s
 # Demand settings
 params.dist_threshold_min = 2000 # min dist
 params.albatross = False  # if False, demand is artificially generated
+
+# Operational costs
+params.drivers.fuel_costs = 0.25 #euro/km
 
 # Regulation settings
 params.platforms.reg_cap = np.inf

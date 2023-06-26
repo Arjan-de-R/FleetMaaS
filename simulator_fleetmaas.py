@@ -4,6 +4,21 @@
 # Rafal Kucharski @ TU Delft
 ################################################################################
 
+import os.path
+import sys
+
+from source.conversion.create_network_from_graphml import *
+from source.conversion.trafo_FleetPy_to_MaaSSim import *
+from source.conversion.trafo_MaaSSim_to_FleetPy import *
+from source.d2d.supply import *
+
+MAIN_DIR = os.path.dirname(__file__)
+ABS_MAIN_DIR = os.path.abspath(MAIN_DIR)
+FLEETPY_DIR = os.path.join(ABS_MAIN_DIR, "FleetPy")
+MAASSIM_DIR = os.path.join(ABS_MAIN_DIR, "MaaSSim")
+sys.path.append(ABS_MAIN_DIR)
+sys.path.append(FLEETPY_DIR)
+# sys.path.append(MAASSIM_DIR)
 
 from MaaSSim.MaaSSim.maassim import Simulator
 from MaaSSim.MaaSSim.shared import prep_shared_rides
@@ -16,14 +31,10 @@ from MaaSSim.MaaSSim.d2d_sim import *
 from MaaSSim.MaaSSim.d2d_demand import *
 from MaaSSim.MaaSSim.d2d_supply import *
 from MaaSSim.MaaSSim.decisions import dummy_False
-from src.conversion.create_network_from_graphml import *
-from src.conversion.trafo_FleetPy_to_MaaSSim import *
-from src.conversion.trafo_MaaSSim_to_FleetPy import *
-from src.d2d.supply import *
-import os.path
+
 import zipfile
 import json
-from FleetPy.run_examples import run_single_simulation
+from FleetPy.run_examples import run_scenarios
 
 # import functions from FleetPy
 # import functions from FleetMaaS - conversion scripts
@@ -155,9 +166,17 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.requests['platform'] = 100 #inData.requests.apply(lambda row: inData.passengers.loc[row.name].platforms[0], axis = 1) # TODO: same
 
     # Set properties of platform(s)
-    inData.platforms = pd.concat([inData.platforms,pd.DataFrame(columns=['base_fare','comm_rate','min_fare'])])
+    inData.platforms = pd.concat([inData.platforms,pd.DataFrame(columns=['base_fare','comm_rate','min_fare','match_obj','max_wait_time','max_rel_detour'])])
     inData.platforms = initialize_df(inData.platforms)
-    inData.platforms.loc[0]=[params.platforms.fare,'Uber',30,params.platforms.base_fare,params.platforms.comm_rate,params.platforms.min_fare,]
+    inData.platforms.loc[0]=[params.platforms.fare,'Platform 0',30,params.platforms.base_fare,params.platforms.comm_rate,params.platforms.min_fare,params.platforms.match_obj,params.platforms.max_wait_time,params.platforms.max_rel_detour,]
+    for plat_id in range(1,params.get('nS', 1)): # more than 1 platform
+        inData.platforms.loc[plat_id]=[params.platforms.get('fare_{}'.format(plat_id),params.platforms.fare),'Platform {}'.format(plat_id),30,
+                                    params.platforms.get('base_fare_{}'.format(plat_id),params.platforms.base_fare),
+                                    params.platforms.get('comm_rate_{}'.format(plat_id), params.platforms.comm_rate),
+                                    params.platforms.get('min_fare_{}'.format(plat_id),params.platforms.min_fare),
+                                    params.platforms.get('match_obj_{}'.format(plat_id),params.platforms.match_obj),
+                                    params.platforms.get('max_wait_time_{}'.format(plat_id),params.platforms.max_wait_time),
+                                    params.platforms.get('max_rel_detour_{}'.format(plat_id),params.platforms.max_rel_detour)]
 
     # Load path
     if path is None:
@@ -180,7 +199,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # graphml_file = params.paths.G
         network_name = params.city.split(",")[0]
         # create_network_from_graphml(graphml_file, network_name) # used only for preprocessing
-        constant_config_file = pd.read_csv(os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file)))
+        constant_config_file = os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file))
 
     # Where are the (final) results of the day-to-day simulation be stored
     scn_name = kwargs.get('scn_name')
@@ -232,15 +251,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, day_name)
 
             # Run FleetPy model
-            scn_file = pd.read_csv(os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{day_name}.csv"), index=False)
-            scenario_parameters = scn_file.merge(constant_config_file, how='left', on='Input_Parameter_Name')
-            
-            # constant_config_file: setup operator 1 = hailing, op_2 = pooling (dep. on scenario), max. waiting time (everything that will remain constant), SCENARIO-SPECIFIC
-            # new_wd_scenario_name: everything that changes from sim to sim
-            run_single_simulation(scenario_parameters)
-            print('Lets see if this works')
-            #run_scenarios(constant_config_file, scn_file, n_parallel_sim=1, n_cpu_per_sim=1, evaluate=1, log_level="info",
-                #   keep_old=False, continue_next_after_error=False)
+            scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{day_name}.csv")
+            run_scenarios(constant_config_file, scn_file)
 
             # FleetPy results
 
