@@ -27,7 +27,7 @@ params.platforms.fare = 1.5 #euro/km
 params.platforms.min_fare = 0 # euro
 params.platforms.comm_rate = 0.25 #rate
 params.platforms.max_wait_time = 600 # maximum time from assignment to pick-up allowed by platform
-params.platforms.match_obj = 'total_system_time'
+params.platforms.match_obj = 'func_key:total_system_time'
 params.platforms.max_rel_detour = 40 # if pooling is not allowed, this is set to 0 (with non-zero additional boarding time preventing pooling for identical trip requests)
 
 # Platform settings - platform 1 (if not specified, the same as platform 0)
@@ -72,6 +72,7 @@ params.evol.travellers.mode_pref.ASC_rs_sd = 0  # 1.95
 params.evol.travellers.mode_pref.ASC_pt_sd = 0  # 1.31
 params.evol.travellers.mode_pref.ASC_bike_sd = 0  # 2.35
 params.evol.travellers.mode_pref.gini = params.evol.drivers.gini
+params.evol.travellers.prob_reg_start = 1
 
 # Properties alternative modes
 params.alt_modes.pt.base_fare = 0.99 # euro
@@ -89,6 +90,10 @@ params.albatross = False  # if False, demand is artificially generated
 
 # Operational costs
 params.drivers.fuel_costs = 0.25 #euro/km
+
+# Multi-homing behaviour
+params.evol.travellers.mh_share = 1 # share of travellers open to multi-homing
+params.evol.drivers.mh_share = 1 # share of drivers open to multi-homing
 
 # Regulation settings
 params.platforms.reg_cap = np.inf

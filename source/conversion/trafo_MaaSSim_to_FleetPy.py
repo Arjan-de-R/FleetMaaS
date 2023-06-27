@@ -10,7 +10,7 @@ def _create_seconds_of_day(dt_str):
     return 3600 * hour + 60 * minute + second
 
 
-def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name, demand_name):
+def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name, demand_name, d2d_params):
     """This function transforms the output files of the day-to-day model for the within-day (FleetPy) model.
 
     :param dtd_result_dir: result directory of last day-to-day iteration
@@ -18,6 +18,8 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     :param fleetpy_study_name: name of study
     :param nw_name: network name
     :param new_wd_scenario_name: scenario name of next within-day simulation
+    :param demand_name: demand name
+    :param d2d_params: day-to-day params, incl. start and end time of all days
     """
     # 1) create demand data set
     rq_f = os.path.join(dtd_result_dir, "inData_requests.csv")
@@ -26,7 +28,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     pax_f = os.path.join(dtd_result_dir, "inData_passengers.csv")
     pax_df = pd.read_csv(pax_f, index_col=0)
     c_df = pd.merge(rq_df, pax_df, left_on="pax_id", right_index=True)
-    f_df = c_df.loc[c_df["platforms"] > 0].reset_index()
+    f_df = c_df.loc[c_df["platforms"] != ';'].reset_index()
     fpy_rq_df = f_df[["rq_id", "treq", "origin", "destination", "platforms"]] # add value of time
     fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
     fpy_rq_df.rename({"rq_id": "request_id", "origin": "start", "destination": "end"}, axis=1, inplace=True) # rename
@@ -83,6 +85,8 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     #driver_id,veh_type,possible_operators
 
     # 3) create scenario input file
+    start_time = _create_seconds_of_day(d2d_params.t0)
+    end_time = start_time + d2d_params.simTime * 3600
     platform_df = pd.read_csv(os.path.join(dtd_result_dir, "inData_platforms.csv"))
     nr_platforms = platform_df.shape[0]
     op_min_fares = ";".join([str(x) for x in platform_df["min_fare"].values])
@@ -91,12 +95,14 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     op_comm_rates = ";".join([str(x) for x in platform_df["comm_rate"].values])
     op_max_detour_time_factor = ";".join([str(x) for x in platform_df["max_rel_detour"].values])
     op_max_wait_time = ";".join([str(x) for x in platform_df["max_wait_time"].values])
-    op_vr_control_func_dict = ";".join([str(x) for x in platform_df["match_obj"].values])
+    op_vr_control_func_dict = "|".join([str(x) for x in platform_df["match_obj"].values])
 
     print(platform_df.head())
     
     sc_df_list = [{
         G_SCENARIO_NAME : new_wd_scenario_name,
+        G_SIM_START_TIME: start_time,
+        G_SIM_END_TIME: end_time,
         G_RQ_FILE : f"{new_wd_scenario_name}.csv",
         G_NR_OPERATORS : nr_platforms,
         G_PLAT_DRIVER_FILE : fp_driver_f_name,

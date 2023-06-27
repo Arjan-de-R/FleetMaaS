@@ -11,6 +11,7 @@ from source.conversion.create_network_from_graphml import *
 from source.conversion.trafo_FleetPy_to_MaaSSim import *
 from source.conversion.trafo_MaaSSim_to_FleetPy import *
 from source.d2d.supply import *
+from source.d2d.demand import *
 
 MAIN_DIR = os.path.dirname(__file__)
 ABS_MAIN_DIR = os.path.abspath(MAIN_DIR)
@@ -80,7 +81,7 @@ def simulate_parallel(config="MaaSSim/data/config/parallel.json", inData=None, p
         params = get_config(config, root_path = kwargs.get('root_path'))  # load from .json file
 
     if len(inData.G) == 0:  # only if no graph in input
-        inData = load_G(inData, params, stats=True)  # download graph for the 'params.city' and calc the skim matrices
+        inData = load_G(inData, params, stats=True, set_t=False)  # download graph for the 'params.city' and calc the skim matrices
         if params.alt_modes.car.diff_parking:
             inData = diff_parking(inData)  # determine which nodes are in center
 
@@ -125,6 +126,19 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     np.random.seed(params.repl_id)
     random.seed(params.repl_id)
 
+    # Set properties of platform(s)
+    inData.platforms = pd.concat([inData.platforms,pd.DataFrame(columns=['base_fare','comm_rate','min_fare','match_obj','max_wait_time','max_rel_detour'])])
+    inData.platforms = initialize_df(inData.platforms)
+    inData.platforms.loc[0]=[params.platforms.fare,'Platform 0',30,params.platforms.base_fare,params.platforms.comm_rate,params.platforms.min_fare,params.platforms.match_obj,params.platforms.max_wait_time,params.platforms.max_rel_detour,]
+    for plat_id in range(1,params.get('nS', 1)): # more than 1 platform
+        inData.platforms.loc[plat_id]=[params.platforms.get('fare_{}'.format(plat_id),params.platforms.fare),'Platform {}'.format(plat_id),30,
+                                    params.platforms.get('base_fare_{}'.format(plat_id),params.platforms.base_fare),
+                                    params.platforms.get('comm_rate_{}'.format(plat_id), params.platforms.comm_rate),
+                                    params.platforms.get('min_fare_{}'.format(plat_id),params.platforms.min_fare),
+                                    params.platforms.get('match_obj_{}'.format(plat_id),params.platforms.match_obj),
+                                    params.platforms.get('max_wait_time_{}'.format(plat_id),params.platforms.max_wait_time),
+                                    params.platforms.get('max_rel_detour_{}'.format(plat_id),params.platforms.max_rel_detour)]
+
     # Generate requests - either based on a distribution or taken from Albatross - and corresponding passenger data
     if params.get('albatross', False):
         inData = load_albatross_proc(inData, params, avg_speed = True)
@@ -132,6 +146,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData = sample_from_alba(inData, params)
     else:
         inData = generate_demand(inData, params, avg_speed = True)
+
     inData.passengers = prefs_travs(inData, params)
 
     # Load processed Albatross file, the OTP result, and compute PT fares
@@ -152,32 +167,17 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         all_pax = inData.passengers.copy()
         all_pax['mode_choice'] == "day-to-day"
 
-    # Generate information available to travellers at the start of the simulation
+    # Generate information available to travellers at the start of the simulation, and whether travellers are willing to multi-home
     inData.passengers['informed'] = np.random.rand(len(inData.passengers)) < params.evol.travellers.inform.prob_start
     inData.passengers['expected_wait'] = params.evol.travellers.inform.start_wait
+    inData.passengers = start_regist_travs(inData.passengers, params)
+    inData.passengers = set_multihoming_travellers(inData.passengers, params)
     
-    # Generate pool of job seekers
+    # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
+    fixed_supply = set_multihoming_drivers(fixed_supply, params)
     inData.vehicles = fixed_supply.copy()
     
-    # Determine which platform agents can use
-    inData.vehicles.platform = 100 #inData.vehicles.apply(lambda x: 100, axis = 1)  # TODO: set multi-homing or single-homing per agent, now we assume everybody multi-homes
-    inData.passengers.platforms = 100 #inData.passengers.apply(lambda x: 100, axis = 1) # TODO: same
-    inData.requests['platform'] = 100 #inData.requests.apply(lambda row: inData.passengers.loc[row.name].platforms[0], axis = 1) # TODO: same
-
-    # Set properties of platform(s)
-    inData.platforms = pd.concat([inData.platforms,pd.DataFrame(columns=['base_fare','comm_rate','min_fare','match_obj','max_wait_time','max_rel_detour'])])
-    inData.platforms = initialize_df(inData.platforms)
-    inData.platforms.loc[0]=[params.platforms.fare,'Platform 0',30,params.platforms.base_fare,params.platforms.comm_rate,params.platforms.min_fare,params.platforms.match_obj,params.platforms.max_wait_time,params.platforms.max_rel_detour,]
-    for plat_id in range(1,params.get('nS', 1)): # more than 1 platform
-        inData.platforms.loc[plat_id]=[params.platforms.get('fare_{}'.format(plat_id),params.platforms.fare),'Platform {}'.format(plat_id),30,
-                                    params.platforms.get('base_fare_{}'.format(plat_id),params.platforms.base_fare),
-                                    params.platforms.get('comm_rate_{}'.format(plat_id), params.platforms.comm_rate),
-                                    params.platforms.get('min_fare_{}'.format(plat_id),params.platforms.min_fare),
-                                    params.platforms.get('match_obj_{}'.format(plat_id),params.platforms.match_obj),
-                                    params.platforms.get('max_wait_time_{}'.format(plat_id),params.platforms.max_wait_time),
-                                    params.platforms.get('max_rel_detour_{}'.format(plat_id),params.platforms.max_rel_detour)]
-
     # Load path
     if path is None:
         path = os.getcwd()
@@ -228,7 +228,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         #----- Pre-day -----#
         inData.passengers = mode_preday(inData, params) # mode choice
 
-        #----- Within-day simulation -----#
+        #----- Within-day simulator -----#
         if params.get('wd_simulator', 'MaaSSim') == 'MaaSSim':
             sim.make_and_run(run_id=day)  # prepare and SIM
             sim.output()  # calc results
@@ -237,6 +237,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         if params.get('wd_simulator', 'MaaSSim') == 'FleetPy':
             # Pre-day work choice
             inData.vehicles = work_preday(inData.vehicles, params)
+
+            # Determine which platform(s) agents can use
+            inData.vehicles.platform = inData.vehicles.apply(lambda x: '0;1' if x.registered else ';', axis=1)
+            inData.passengers.platforms = inData.passengers.apply(lambda x: '0;1' if x.registered else ';', axis=1)
 
             # Generate input csv's for FleetPy
             dtd_result_dir = os.path.join(path, 'temp_res','{}'.format(scn_name))
@@ -249,7 +253,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
             # FleetPy init: conversion from MaaSSim data structure
             day_name = scn_name + '_day_{}'.format(day) # id in FleetPy
-            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, day_name, demand_name)
+            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, day_name, demand_name, params)
 
             # Run FleetPy model
             scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{day_name}.csv")
