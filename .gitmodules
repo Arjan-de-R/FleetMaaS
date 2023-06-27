@@ -1,6 +1,7 @@
 [submodule "MaaSSim"]
 	path = MaaSSim
 	url = https://github.com/Arjan-de-R/MaaSSim
+	branch = fleetmaas
 [submodule "FleetPy"]
 	path = FleetPy
 	url = https://github.com/TUM-VT/FleetPy
