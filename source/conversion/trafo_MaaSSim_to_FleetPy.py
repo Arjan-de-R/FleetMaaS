@@ -9,6 +9,15 @@ def _create_seconds_of_day(dt_str):
     hour, minute, second =  [int(x) for x in dt_str.split(" ")[1].split(":")]
     return 3600 * hour + 60 * minute + second
 
+def convert_platform_encoding(platforms_str):
+    if platforms_str == ";":
+        return None
+    elif platforms_str == "0;":
+        return "0"
+    elif platforms_str == "1;":
+        return "1"
+    else:
+        return "0;1"
 
 def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name, demand_name, d2d_params):
     """This function transforms the output files of the day-to-day model for the within-day (FleetPy) model.
@@ -41,6 +50,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]]
     fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
     fpy_rq_df.rename({"rq_id": "request_id", "VoT": "value_of_time", "platforms" : "user_list_operators"}, axis=1, inplace=True) # rename
+    fpy_rq_df["user_list_operators"] = fpy_rq_df["user_list_operators"].apply(lambda x: convert_platform_encoding(x))
     fpy_rq_df.sort_values("rq_time", inplace=True)
 
     fpy_rq_f = os.path.join(fleetpy_dir, "data", "demand", demand_name)
@@ -68,10 +78,13 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     #driver_id,veh_type,possible_operators,start_node,operating_times
     fp_driver_df_list = []
     for driver_id, driver_row in driver_df.iterrows():
+        platforms = convert_platform_encoding(driver_row["platform"])
+        if platforms is None:
+            continue
         fp_driver_df_list.append({
             "driver_id" : driver_id,
             "start_node" : source_to_node_id[driver_row["pos"]],  
-            "possible_operators" : driver_row["platform"],   # TODO how is encoding for multiple operators?
+            "possible_operators" : platforms,   # TODO how is encoding for multiple operators?
             "operating_times" : f"{driver_row['shift_start']};{driver_row['shift_end']}",
             "veh_type" : "default_vehtype" # TODO?
         })
