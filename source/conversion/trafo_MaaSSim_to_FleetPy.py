@@ -21,6 +21,10 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     :param demand_name: demand name
     :param d2d_params: day-to-day params, incl. start and end time of all days
     """
+    # 0) convert MaaSSim node id to FleetPy node id
+    fp_nodes = pd.read_csv(r'FleetPy\data\networks\Delft\base\nodes.csv')  #TODO: make relative path
+    trafo_dict = fp_nodes[['node_index', 'source_node_id']].set_index('source_node_id').to_dict()['node_index']
+
     # 1) create demand data set
     rq_f = os.path.join(dtd_result_dir, "inData_requests.csv")
     rq_df = pd.read_csv(rq_f, index_col=0)
@@ -29,9 +33,11 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     pax_df = pd.read_csv(pax_f, index_col=0)
     c_df = pd.merge(rq_df, pax_df, left_on="pax_id", right_index=True)
     f_df = c_df.loc[c_df["platforms"] != ';'].reset_index()
-    fpy_rq_df = f_df[["rq_id", "treq", "origin", "destination", "platforms", "VoT"]]
+    f_df['start'] = f_df['origin'].apply(lambda x: trafo_dict[x])
+    f_df['end'] = f_df['destination'].apply(lambda x: trafo_dict[x])
+    fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]]
     fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
-    fpy_rq_df.rename({"rq_id": "request_id", "origin": "start", "destination": "end", "VoT": "value_of_time"}, axis=1, inplace=True) # rename
+    fpy_rq_df.rename({"rq_id": "request_id", "VoT": "value_of_time"}, axis=1, inplace=True) # rename
     fpy_rq_df.sort_values("rq_time", inplace=True)
 
     nodes_df = pd.read_csv(os.path.join(fleetpy_dir, "data", "networks", nw_name, "base", "nodes.csv"))
