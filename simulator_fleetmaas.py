@@ -239,8 +239,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             inData.vehicles = work_preday(inData.vehicles, params)
 
             # Determine which platform(s) agents can use
-            inData.vehicles.platform = inData.vehicles.apply(lambda x: '0;1' if x.registered else ';', axis=1)
-            inData.passengers.platforms = inData.passengers.apply(lambda x: '0;1' if x.registered else ';', axis=1)
+            inData.vehicles.platform = inData.vehicles.apply(lambda x: '0;1' if x.ptcp else ';', axis=1)
+            inData.passengers.platforms = inData.passengers.apply(lambda x: '0;1' if x.mode_day == 'rs' else ';', axis=1)
 
             # Generate input csv's for FleetPy
             dtd_result_dir = os.path.join(path, 'temp_res','{}'.format(scn_name))
@@ -252,14 +252,21 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             inData.platforms.to_csv(os.path.join(dtd_result_dir,'inData_platforms.csv')) 
 
             # FleetPy init: conversion from MaaSSim data structure
-            day_name = scn_name + '_day_{}'.format(day) # id in FleetPy
-            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, day_name, demand_name, params)
+            fp_run_id = scn_name + '_day_{}'.format(day) # id in FleetPy
+            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, fp_run_id, demand_name, params)
 
             # Run FleetPy model
-            scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{day_name}.csv")
+            scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{fp_run_id}.csv")
             run_scenarios(constant_config_file, scn_file)
 
             # FleetPy results
+            transform_wd_output_to_d2d_input(fleetpy_dir, fleetpy_study_name, fp_run_id)
+
+            # what do we need:
+            ## income of drivers
+            ## waiting time of travs
+            ## in-vehicle time of travs
+            ## fare paid by travs
 
             # FleetPy conversion: convert results back to MaaSSim datastructure
 
