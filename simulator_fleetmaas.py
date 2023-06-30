@@ -32,7 +32,7 @@ from MaaSSim.MaaSSim.d2d_sim import *
 from MaaSSim.MaaSSim.d2d_demand import *
 from MaaSSim.MaaSSim.d2d_supply import *
 from MaaSSim.MaaSSim.decisions import dummy_False
-from reproduce_MS_simulator import repl_sim_object
+from source.d2d.reproduce_MS_simulator import repl_sim_object
 
 import zipfile
 import json
@@ -261,17 +261,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{fp_run_id}.csv")
             run_scenarios(constant_config_file, scn_file)
 
-            # FleetPy results: convert back to MaaSSim structure (simulator object)
-            transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_run_id, inData)
-            print('lets see how this goes')
-
-            # what do we need:
-            ## income of drivers
-            ## waiting time of travs
-            ## in-vehicle time of travs
-            ## fare paid by travs
-
-            # FleetPy conversion: convert results back to MaaSSim datastructure
+            # FleetPy results: convert back to MaaSSim structure (simulator object) #TODO: o.a. indicators per platform, expected in-vehicle time, multi-homing vs single-homing
+            sim = transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_run_id, inData)
 
         #----- Post-day -----#
         # Determine key KPIs
