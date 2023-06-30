@@ -29,7 +29,7 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     sim.last_res.pax_exp = pax_exp.copy() # store in MaaSSim simulator object
 
     # 2) Load driver KPIs
-    driver_kpis_0 = pd.read_csv(os.path.join(result_dir,'standard_mod-0_veh_eval.csv'), index_col = 0).set_index('driver_id')  # platform 0
+    driver_kpis_0 = pd.read_csv(os.path.join(result_dir,'standard_mod-0_veh_eval.csv'), index_col = 0).set_index('driver_id')  # platform 0 # TODO: how do we handle when no driver works (and same for travs)
     driver_kpis_1 = pd.read_csv(os.path.join(result_dir,'standard_mod-1_veh_eval.csv'), index_col = 0).set_index('driver_id')  # platform 1
     aggr_kpis = pd.concat([driver_kpis_0, driver_kpis_1])
     aggr_kpis = aggr_kpis.groupby('driver_id').sum()
