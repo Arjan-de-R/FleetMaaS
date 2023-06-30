@@ -44,6 +44,7 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     kpis_no_ptcp = {'NET_INCOME': np.nan, 'OUT': True, 'FORCED_OUT': False}
     no_ptcp_df = pd.DataFrame.from_dict(kpis_no_ptcp, orient='index').transpose()
     no_ptcp_df = pd.DataFrame(np.repeat(no_ptcp_df.to_numpy(), len(noptcp_drivers), axis=0), columns=no_ptcp_df.columns) # repeat same row for all drivers that did not work
+    no_ptcp_df = no_ptcp_df.astype(dtype= {"NET_INCOME":"float64", "OUT":"bool", "FORCED_OUT":"bool"})
     no_ptcp_df['driver_id'] = noptcp_drivers
     no_ptcp_df = no_ptcp_df.set_index('driver_id')
     veh_exp = pd.concat([veh_exp,no_ptcp_df]).sort_index()
