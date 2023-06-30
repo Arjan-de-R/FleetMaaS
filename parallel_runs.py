@@ -18,7 +18,7 @@ params.nP = 1000 # travellers
 params.nV = 50 # drivers
 params.nS = 2 # number of service providers
 params.nD = 3 # days
-params.simTime = 8 # hours
+params.simTime = 2 # hours
 params.wd_simulator = 'FleetPy'
 
 # Platform settings - platform 0

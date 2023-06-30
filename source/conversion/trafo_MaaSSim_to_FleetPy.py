@@ -106,9 +106,9 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     end_time = start_time + d2d_params.simTime * 3600
     platform_df = pd.read_csv(os.path.join(dtd_result_dir, "inData_platforms.csv"))
     nr_platforms = platform_df.shape[0]
-    op_min_fares = ";".join([str(x) for x in platform_df["min_fare"].values])
-    op_base_fares = ";".join([str(x) for x in platform_df["base_fare"].values])
-    op_dis_fares = ";".join([str(x/1000.0) for x in platform_df["fare"].values])
+    op_min_fares = ";".join([str(x*100) for x in platform_df["min_fare"].values])
+    op_base_fares = ";".join([str(x*100) for x in platform_df["base_fare"].values])
+    op_dis_fares = ";".join([str(x/10) for x in platform_df["fare"].values])
     op_comm_rates = ";".join([str(x) for x in platform_df["comm_rate"].values])
     op_max_detour_time_factor = ";".join([str(x) for x in platform_df["max_rel_detour"].values])
     op_max_wait_time = ";".join([str(x) for x in platform_df["max_wait_time"].values])

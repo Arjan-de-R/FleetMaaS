@@ -32,6 +32,7 @@ from MaaSSim.MaaSSim.d2d_sim import *
 from MaaSSim.MaaSSim.d2d_demand import *
 from MaaSSim.MaaSSim.d2d_supply import *
 from MaaSSim.MaaSSim.decisions import dummy_False
+from reproduce_MS_simulator import repl_sim_object
 
 import zipfile
 import json
@@ -201,6 +202,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # graphml_file = params.paths.G
         # create_network_from_graphml(graphml_file, network_name) # used only for preprocessing
         constant_config_file = os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file))
+        sim = repl_sim_object(inData, params=params, **kwargs)  # initialize MaaSSim simulator object to which FleetPy results are returned
 
     # Where are the (final) results of the day-to-day simulation be stored
     scn_name = kwargs.get('scn_name')
@@ -259,8 +261,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{fp_run_id}.csv")
             run_scenarios(constant_config_file, scn_file)
 
-            # FleetPy results
-            transform_wd_output_to_d2d_input(fleetpy_dir, fleetpy_study_name, fp_run_id)
+            # FleetPy results: convert back to MaaSSim structure (simulator object)
+            transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_run_id, inData)
+            print('lets see how this goes')
 
             # what do we need:
             ## income of drivers
