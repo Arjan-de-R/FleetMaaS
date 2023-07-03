@@ -117,6 +117,8 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     print(platform_df.head())
     
     sc_df_list = [{
+        G_NETWORK_NAME: nw_name,
+        G_DEMAND_NAME: demand_name,
         G_SCENARIO_NAME : new_wd_scenario_name,
         G_SIM_START_TIME: start_time,
         G_SIM_END_TIME: end_time,
