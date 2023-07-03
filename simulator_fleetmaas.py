@@ -199,8 +199,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         config_file = params.fleetpy_config
         network_name = params.city.split(",")[0]
         demand_name = network_name
-        # graphml_file = params.paths.G
-        # create_network_from_graphml(graphml_file, network_name) # used only for preprocessing
+        if not os.path.exists(os.path.join(fleetpy_dir, "data", "networks", network_name)):
+            graphml_file = params.paths.G
+            create_network_from_graphml(graphml_file, network_name)
         constant_config_file = os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file))
         sim = repl_sim_object(inData, params=params, **kwargs)  # initialize MaaSSim simulator object to which FleetPy results are returned
 
