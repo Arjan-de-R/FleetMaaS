@@ -50,18 +50,24 @@ def create_network_from_graphml(graphml_file, network_name):
         source_edge_id = graph.edges[edge]["osmid"]
         length = graph.edges[edge]["length"]
         # infer edge speeds if not data given
+        if len(graph.edges[edge]["highway"].split(",")) > 1: # if link has different kind of lanes
+            graph.edges[edge]["highway"] = graph.edges[edge]["highway"].replace("[","").replace("]","").replace("'","").split(",")[0] # assume first lane type for all
         try:
             speed = graph.edges[edge]["maxspeed"]
             if len(speed.split(",")) > 1:
                 speed = speed.split(",")[0][2:-1:]
                 #print("was list!", speed)
         except KeyError:
-            if graph.edges[edge]["highway"] == "residential":
+            if graph.edges[edge]["highway"] in ["residential", "road"]:
                 speed = 30
             elif graph.edges[edge]["highway"] == "living_street":
                 speed = 15
-            elif graph.edges[edge]["highway"] == "unclassified":
+            elif graph.edges[edge]["highway"] in ["unclassified", "primary", "secondary", "tertiary", "primary_link", "secondary_link", "tertiary_link"]:
                 speed = 50
+            elif graph.edges[edge]["highway"] in ["motorway_link", "motorway"]:
+                speed = 100
+            elif graph.edges[edge]["highway"] in ["trunk_link", "trunk"]:
+                speed = 80
             else:
                 raise KeyError
         travel_time = float(length)/float(speed)*3.6
