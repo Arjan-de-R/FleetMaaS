@@ -242,8 +242,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             inData.vehicles = work_preday(inData.vehicles, params)
 
             # Determine which platform(s) agents can use
-            inData.vehicles.platform = inData.vehicles.apply(lambda x: '0;1' if x.ptcp else ';', axis=1)
-            inData.passengers.platforms = inData.passengers.apply(lambda x: '0;1' if x.mode_day == 'rs' else ';', axis=1)
+            mh_coding = ['0', '0;1']    # multi-homing coding depending on the number of service providers - works for 1 or 2 service providers #TODO: expand to more providers
+            inData.vehicles.platform = inData.vehicles.apply(lambda x: mh_coding[params.nS - 1] if x.ptcp else ';', axis=1)
+            inData.passengers.platforms = inData.passengers.apply(lambda x: mh_coding[params.nS - 1] if x.mode_day == 'rs' else ';', axis=1)
 
             # Generate input csv's for FleetPy
             dtd_result_dir = os.path.join(path, 'temp_res','{}'.format(scn_name))
