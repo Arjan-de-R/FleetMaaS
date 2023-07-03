@@ -3,3 +3,8 @@ source/conversion/__pycache__/trafo_MaaSSim_to_FleetPy.cpython-37.pyc
 source/d2d/__pycache__/supply.cpython-37.pyc
 cache/
 source/d2d/__pycache__/
+.idea*
+*__pycache*
+*pyc
+results/*
+temp_res/*
