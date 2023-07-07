@@ -21,17 +21,17 @@ sys.path.append(ABS_MAIN_DIR)
 sys.path.append(FLEETPY_DIR)
 # sys.path.append(MAASSIM_DIR)
 
-from MaaSSim.MaaSSim.maassim import Simulator
-from MaaSSim.MaaSSim.shared import prep_shared_rides
-from MaaSSim.MaaSSim.utils import get_config, load_G, generate_demand, generate_vehicles, initialize_df, empty_series, \
-    slice_space, read_requests_csv, read_vehicle_positions
+from MaaSSim.src_MaaSSim.maassim import Simulator
+from MaaSSim.src_MaaSSim.shared import prep_shared_rides
+from MaaSSim.src_MaaSSim.utils import get_config, load_G, generate_demand, generate_vehicles, initialize_df, empty_series, \
+    slice_space, read_vehicle_positions
 from scipy.optimize import brute
 import logging
 import re
-from MaaSSim.MaaSSim.d2d_sim import *
-from MaaSSim.MaaSSim.d2d_demand import *
-from MaaSSim.MaaSSim.d2d_supply import *
-from MaaSSim.MaaSSim.decisions import dummy_False
+from MaaSSim.src_MaaSSim.d2d_sim import *
+from MaaSSim.src_MaaSSim.d2d_demand import *
+from MaaSSim.src_MaaSSim.d2d_supply import *
+from MaaSSim.src_MaaSSim.decisions import dummy_False
 from source.d2d.reproduce_MS_simulator import repl_sim_object
 
 import zipfile
@@ -52,21 +52,12 @@ def single_pararun(one_slice, *args):
     for i, key in enumerate(search_space.keys()):
         val = search_space[key][int(one_slice[int(i)])]
         stamp[key] = val
-
-        if key in ['comm_rate', 'fare', 'base_fare', 'reg_cap', 'ptcp_cap']:
-            _params.platforms[key] = val
-        if key == 'gini':
-            _params.evol.drivers[key] = val
-            _params.evol.travellers.mode_pref[key] = val
-        else:
-            _params[key] = val
-
-    # stamp['dt'] = str(pd.Timestamp.now()).replace('-','').replace('.','').replace(' ','')
+        _params = return_scn_params(params, key, val)
 
     scn_name = ''
     for key, value in stamp.items():
-        scn_name += '-{}_{}'.format(key, value)
-    scn_name = re.sub('[^-a-zA-Z0-9_.() ]+', '', scn_name)
+        scn_name += '-{}-{}'.format(key, value)
+    scn_name = re.sub('[^-a-zA-Z0-9_.() ]+', '', scn_name)[1:]
 
     sim = simulate(inData=_inData, params=_params, logger_level=logging.WARNING, scn_name = scn_name)
 
@@ -76,7 +67,7 @@ def single_pararun(one_slice, *args):
 
 def simulate_parallel(config="MaaSSim/data/config/parallel.json", inData=None, params=None, search_space=None, **kwargs):
     if inData is None:  # otherwise we use what is passed
-        from MaaSSim.MaaSSim.data_structures import structures
+        from MaaSSim.src_MaaSSim.data_structures import structures
         inData = structures.copy()  # fresh data
     if params is None:
         params = get_config(config, root_path = kwargs.get('root_path'))  # load from .json file
@@ -106,16 +97,26 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     """
 
     if inData is None:  # otherwise we use what is passed
-        from MaaSSim.MaaSSim.data_structures import structures
+        from MaaSSim.src_MaaSSim.data_structures import structures
         inData = structures.copy()  # fresh data
     if params is None:
             params = get_config(config, root_path = kwargs.get('root_path'))  # load from .json file
     if kwargs.get('make_main_path',False):
-        from MaaSSim.MaaSSim.utils import make_config_paths
+        from MaaSSim.src_MaaSSim.utils import make_config_paths
         params = make_config_paths(params, main = kwargs.get('make_main_path',False), rel = True)
 
     if params.paths.get('requests', False):
-        inData = read_requests_csv(inData, path=params.paths.requests)
+        inData = read_requests_csv(inData, params.paths.requests) # read request file
+        if params.nP > inData.requests.shape[0]:
+            raise Exception("Number of travellers is larger than demand dataset")
+        if params.paths.get('PT_trips',False):
+            pt_trips = load_OTP_result(params) # load output of OpenTripPlanner queries for the preprocessed requests and add resulting PT attributes to inData.requests
+            inData.requests = pd.concat([inData.requests, pt_trips], axis=1)
+            del pt_trips
+        inData = sample_from_database(inData, params)  # sample nP and create inData.passengers
+    else:
+        # Generate requests - either based on a distribution or taken from Albatross - and corresponding passenger data
+        inData = generate_demand(inData, params, avg_speed = True)
 
     if params.paths.get('vehicles', False):
         inData = read_vehicle_positions(inData, path=params.paths.vehicles)
@@ -140,30 +141,17 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
                                     params.platforms.get('max_wait_time_{}'.format(plat_id),params.platforms.max_wait_time),
                                     params.platforms.get('max_rel_detour_{}'.format(plat_id),params.platforms.max_rel_detour)]
 
-    # Generate requests - either based on a distribution or taken from Albatross - and corresponding passenger data
-    if params.get('albatross', False):
-        inData = load_albatross_proc(inData, params, avg_speed = True)
-        inData.requests = inData.requests.drop(['orig_geo', 'dest_geo', 'origin_y', 'origin_x', 'destination_y', 'destination_x', 'time'], axis = 1)
-        inData = sample_from_alba(inData, params)
-    else:
-        inData = generate_demand(inData, params, avg_speed = True)
-
+    # Generate mode preferences
     inData.passengers = prefs_travs(inData, params)
-
-    # Load processed Albatross file, the OTP result, and compute PT fares
-    # inData.pt_itinerary = load_OTP_result(params)
 
     # Determine whether to consider all generated requests in day-to-day simulation or only those that are relatively likely to consider ride-hailing
     if params.evol.travellers.get('min_prob', 0) > 0:
         all_pax = mode_filter(inData, params)
         inData.passengers = all_pax[all_pax.mode_choice == "day-to-day"]
-        inData.requests = inData.requests[inData.requests.pax_id.isin(inData.passengers.index)]
-        # inData.pt_itinerary = inData.pt_itinerary[inData.pt_itinerary.pax_id.isin(inData.passengers.index)] # TODO: check compatibility PT alternative
+        inData.requests = inData.requests[inData.requests.index.isin(inData.passengers.index)]
         inData.passengers.reset_index(drop=True, inplace=True)
         inData.requests.reset_index(drop=True, inplace=True)
-        # inData.pt_itinerary.reset_index(drop=True, inplace=True)
         inData.requests['pax_id'] = inData.requests.index
-        # inData.pt_itinerary['pax_id'] = inData.pt_itinerary.index
     else:
         all_pax = inData.passengers.copy()
         all_pax['mode_choice'] == "day-to-day"
@@ -185,18 +173,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     # Prepare schedule for shared rides and the within-day simulator
     inData = prep_shared_rides(inData, params.shareability)  # prepare schedules
-    if params.get('wd_simulator', 'MaaSSim') == 'MaaSSim':
-        sim = Simulator(inData, params=params,
-                    kpi_veh = D2D_veh_exp,
-                    kpi_pax = d2d_kpi_pax,
-                    f_driver_out = D2D_driver_out,
-                    f_trav_out = d2d_no_request,
-                    f_trav_mode = dummy_False, **kwargs)  # initialize
-    if params.get('wd_simulator', 'MaaSSim') == 'FleetPy':
-        # Initialise FleetPy
+    if params.paths.get('fleetpy_config', False): # initialise FleetPy
         fleetpy_dir = os.path.join(path, 'FleetPy')
         fleetpy_study_name = params.get('study_name', 'MaaSSim_FleetPy')
-        config_file = params.fleetpy_config
+        config_file = params.paths.fleetpy_config
         network_name = params.city.split(",")[0]
         demand_name = network_name
         if not os.path.exists(os.path.join(fleetpy_dir, "data", "networks", network_name)):
@@ -204,6 +184,13 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             create_network_from_graphml(graphml_file, network_name)
         constant_config_file = os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file))
         sim = repl_sim_object(inData, params=params, **kwargs)  # initialize MaaSSim simulator object to which FleetPy results are returned
+    else: # initialise MaaSSim within-day simulator
+        sim = Simulator(inData, params=params,
+                    kpi_veh = D2D_veh_exp,
+                    kpi_pax = d2d_kpi_pax,
+                    f_driver_out = D2D_driver_out,
+                    f_trav_out = d2d_no_request,
+                    f_trav_mode = dummy_False, **kwargs)  # initialize
 
     # Where are the (final) results of the day-to-day simulation be stored
     scn_name = kwargs.get('scn_name')
@@ -232,12 +219,12 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.passengers = mode_preday(inData, params) # mode choice
 
         #----- Within-day simulator -----#
-        if params.get('wd_simulator', 'MaaSSim') == 'MaaSSim':
+        if not params.paths.get('fleetpy_config', False): # run MaaSSim
             sim.make_and_run(run_id=day)  # prepare and SIM
             sim.output()  # calc results
             sim.last_res = sim.res[day].copy() # create a copy of the results - saved later
             del sim.res[day]
-        if params.get('wd_simulator', 'MaaSSim') == 'FleetPy':
+        else: # run FleetPy
             # Pre-day work choice
             inData.vehicles = work_preday(inData.vehicles, params)
 
@@ -256,7 +243,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             inData.platforms.to_csv(os.path.join(dtd_result_dir,'inData_platforms.csv')) 
 
             # FleetPy init: conversion from MaaSSim data structure
-            fp_run_id = scn_name + '_day_{}'.format(day) # id in FleetPy
+            fp_run_id = scn_name + '-day-{}'.format(day) # id in FleetPy
             transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, fp_run_id, demand_name, params)
 
             # Run FleetPy model
@@ -317,6 +304,6 @@ if __name__ == "__main__":
     # simulate(make_main_path='..')  # single run
     simulate()  # single run
 
-    from MaaSSim.MaaSSim.utils import test_space
+    from MaaSSim.src_MaaSSim.utils import test_space
 
     simulate_parallel(search_space = test_space())

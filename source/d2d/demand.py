@@ -1,5 +1,5 @@
 import numpy as np
-from MaaSSim.MaaSSim.d2d_demand import *
+from MaaSSim.src_MaaSSim.d2d_demand import *
 
 def mode_choice_preday(inData, params):
     "determine the mode at the start of a day for a pool of travellers"

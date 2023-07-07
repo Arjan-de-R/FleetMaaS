@@ -1,5 +1,5 @@
 from dotmap import DotMap
-from MaaSSim.MaaSSim.decisions import f_dummy_repos, f_match, dummy_False
+from MaaSSim.src_MaaSSim.decisions import f_dummy_repos, f_match, dummy_False
 
 class repl_sim_object:
     """
