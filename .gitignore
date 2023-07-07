@@ -1,14 +1,18 @@
 # Results
-temp_res
-results
+temp_res/*
+results/*
 
 # Pycache
 __pycache__/simulator_fleetmaas.cpython-37.pyc
 source/d2d/__pycache__/supply.cpython-37.pyc
 cache/
 source/d2d/__pycache__/
+<<<<<<< HEAD
 source/conversion/__pycache__/
 __pycache__/
+.idea*
+*__pycache*
+*pyc
 
 # Other
  .vscode/

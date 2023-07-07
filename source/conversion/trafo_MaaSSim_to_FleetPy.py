@@ -9,6 +9,7 @@ def _create_seconds_of_day(dt_str):
     hour, minute, second =  [int(x) for x in dt_str.split(" ")[1].split(":")]
     return 3600 * hour + 60 * minute + second
 
+
 def convert_platform_encoding(platforms_str):
     if platforms_str == ";":
         return None
@@ -19,7 +20,9 @@ def convert_platform_encoding(platforms_str):
     else:
         return "0;1"
 
-def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name, demand_name, d2d_params):
+
+def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name,
+                                     demand_name, zone_system_name, exp_zone_demand, d2d_params):
     """This function transforms the output files of the day-to-day model for the within-day (FleetPy) model.
 
     :param dtd_result_dir: result directory of last day-to-day iteration
@@ -28,6 +31,8 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     :param nw_name: network name
     :param new_wd_scenario_name: scenario name of next within-day simulation
     :param demand_name: demand name
+    :param zone_system_name: zone system name
+    :param exp_zone_demand: dataframe with columns: zone_id,  expected_demand
     :param d2d_params: day-to-day params, incl. start and end time of all days
     """
     # 0) convert MaaSSim node id to FleetPy node id
@@ -68,6 +73,27 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         fpy_rq_df.to_csv(fpy_rq_f, index=False)
     except:
         raise NotImplementedError
+
+    # 1b) create demand forecast file
+    start_time = _create_seconds_of_day(d2d_params.t0)
+    end_time = start_time + d2d_params.simTime * 3600
+    if zone_system_name is not None and exp_zone_demand is not None:
+        # valid throughout the time interval
+        fc_df = exp_zone_demand.copy()
+        fc_df["time"] = start_time
+        fc_df.rename({"expected_demand": "out perfect_trips"}, axis=1, inplace=True)
+        fc_df["out perfect_pax"] = fc_df["out perfect_trips"]
+        # no incoming / supply forecasts
+        fc_df["in perfect_trips"] = 0
+        fc_df["in perfect_pax"] = 0
+        fpy_fc_rq_dir = os.path.join(fleetpy_dir, "data", "demand", demand_name, "aggregated", zone_system_name,
+                                     str(end_time))
+        if not os.path.isdir(fpy_fc_rq_dir):
+            os.makedirs(fpy_fc_rq_dir)
+        fpy_fc_rq_f = os.path.join(fpy_fc_rq_dir, f"{new_wd_scenario_name}.csv")
+        fc_df.to_csv(fpy_fc_rq_f)
+    else:
+        fpy_fc_rq_f = None
 
     # 2) create driver/vehicle data file
     # TODO # specification of input file and codes for initialization (and rest)
@@ -119,20 +145,27 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     sc_df_list = [{
         G_NETWORK_NAME: nw_name,
         G_DEMAND_NAME: demand_name,
-        G_SCENARIO_NAME : new_wd_scenario_name,
+        G_SCENARIO_NAME: new_wd_scenario_name,
         G_SIM_START_TIME: start_time,
         G_SIM_END_TIME: end_time,
-        G_RQ_FILE : f"{new_wd_scenario_name}.csv",
-        G_NR_OPERATORS : nr_platforms,
-        G_PLAT_DRIVER_FILE : fp_driver_f_name,
-        G_OP_FARE_B : op_base_fares,
-        G_OP_FARE_D : op_dis_fares,
-        G_OP_FARE_MIN : op_min_fares,
-        G_OP_PLAT_COMMISION : op_comm_rates,
+        G_RQ_FILE: f"{new_wd_scenario_name}.csv",
+        G_NR_OPERATORS: nr_platforms,
+        G_PLAT_DRIVER_FILE: fp_driver_f_name,
+        G_OP_FARE_B: op_base_fares,
+        G_OP_FARE_D: op_dis_fares,
+        G_OP_FARE_MIN: op_min_fares,
+        G_OP_PLAT_COMMISION: op_comm_rates,
         G_OP_MAX_DTF: op_max_detour_time_factor,
         G_OP_MAX_WT: op_max_wait_time,
         G_OP_VR_CTRL_F: op_vr_control_func_dict
     }]
+    if fpy_fc_rq_f:
+        sc_df_list[0].update({
+            G_ZONE_SYSTEM_NAME: zone_system_name,
+            G_FC_FNAME: fpy_fc_rq_f,
+            G_FC_TYPE: "perfect_trips",
+            G_FC_TR: end_time
+        })
     
     sc_df = pd.DataFrame(sc_df_list)
     sc_df.to_csv(os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{new_wd_scenario_name}.csv"), index=False)
@@ -141,10 +174,19 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
 
 # testing
 if __name__ == '__main__':
+    class Param:
+        def __init__(self, t0, sim_time):
+            self.t0 = t0
+            self.simTime = sim_time
+
     FleetPy_Path = os.path.join( os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "FleetPy")
     fleetpy_study_name = "maasim_fleetpy_trb24"
     dtd_result_dir = os.path.join(FleetPy_Path, "studies", fleetpy_study_name, "Input_MaaSSim")
     fleetpy_dir = FleetPy_Path
     nw_name = "delft"
+    demand_name = "delft"
+    zone_system_n, exp_zone_demand_df = None, None
     new_wd_scenario_name = "test_iteration_1"
-    transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name)
+    d2d = Param(0, 8)
+    transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, demand_name,
+                                     new_wd_scenario_name, zone_system_n, exp_zone_demand_df, d2d)
