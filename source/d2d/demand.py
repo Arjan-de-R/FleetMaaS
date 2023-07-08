@@ -35,3 +35,13 @@ def start_regist_travs(trav_df, params):
     trav_df['registered'] = (np.random.rand(trav_df.shape[0]) < prob_reg_start) & trav_df.informed
 
     return trav_df
+
+
+def learn_demand(inData, params, zones, perc_demand):
+    '''learn demand based on last demand and previous expected demand, used for repositioning'''
+    day_demand = inData.passengers[inData.passengers.mode_day == 'rs']
+    reqs_per_zone = day_demand.zone_id.value_counts()
+    reqs_per_zone = reqs_per_zone.reindex(zones.zone_id.values, fill_value=0)
+    perc_demand['requests'] = (1-params.evol.travellers.kappa) * perc_demand['requests'] + params.evol.travellers.kappa * reqs_per_zone
+
+    return perc_demand

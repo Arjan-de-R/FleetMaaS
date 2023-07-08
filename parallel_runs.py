@@ -8,20 +8,21 @@ from MaaSSim.src_MaaSSim.utils import save_config, get_config
 from MaaSSim.src_MaaSSim.d2d_sim import *
 
 ### CHOOSE CONFIG FILE
-params = get_config(os.path.join('MaaSSim','data','config','Delft_FleetPy.json'))
+params = get_config(os.path.join('MaaSSim','data','config','Ams_FleetPy.json'))
 
 ### OPTIONAL: ADD / CHANGE MODEL PARAMETERS
 ## General settings
-# params.paths.albatross = 'MaaSSim/data/albatross'
-# params.paths.requests = 'MaaSSim/data/demand/{}/distribution/preprocessed.csv'.format(params.city.split(",")[0])
-# params.paths.PT_trips = 'MaaSSim/data/demand/{}/distribution/req_PT.csv'.format(params.city.split(",")[0])
+# params.city = "Amsterdam, Netherlands"
+# params.paths.albatross = os.path.join(MAASSIM_DIR,'data','albatross')
+# params.paths.requests = os.path.join(MAASSIM_DIR,'data','demand','{}'.format(params.city.split(",")[0],'albatross','preprocessed.csv')
+# params.paths.PT_trips = os.path.join(MAASSIM_DIR,'data','demand','{}'.format(params.city.split(",")[0],'albatross','req_PT.csv')
 # params.study_name = 'competition_trb24'
 # params.paths.fleetpy_config = 'constant_config.csv'
-# params.nP = 200 # travellers
-# params.nV = 50 # drivers
+# params.nP = 5000 # travellers
+# params.nV = 100 # drivers
 # params.nS = 2 # number of service providers - more than one currently only works with FleetPy
 # params.nD = 3 # days
-# params.simTime = 2 # hours
+# params.simTime = 8 # hours
 ## Platform settings - platform 0
 # params.platforms.base_fare = 1.5 #euro
 # params.platforms.fare = 1.5 #euro/km
@@ -37,6 +38,8 @@ params = get_config(os.path.join('MaaSSim','data','config','Delft_FleetPy.json')
 ## Multi-homing behaviour
 # params.evol.travellers.mh_share = 1 # share of travellers open to multi-homing
 # params.evol.drivers.mh_share = 1 # share of drivers open to multi-homing
+## Traveller filter
+params.evol.travellers.min_prob = 0
 ## Start time
 # params.t0 = pd.Timestamp(2023, 6, 13, 9)
 
@@ -65,9 +68,9 @@ def determine_n_threads(search_space):
 search_space=sample_space()
 params.parallel.nThread = determine_n_threads(search_space)
 
-### OPTIONAL: If you want to save the parameter values to a config json
+## OPTIONAL: If you want to save the parameter values to a config json
 # params.t0 = params.t0.to_pydatetime().strftime('%Y-%m-%d %H:%M:%S')
-# params.NAME = "Delft_FleetPy"
+# params.NAME = "Ams_FleetPy"
 # params.paths.params = os.path.join(MAASSIM_DIR,"data","config")
 # save_config(params)
 

@@ -36,11 +36,8 @@ from source.d2d.reproduce_MS_simulator import repl_sim_object
 
 import zipfile
 import json
+import geopandas
 from FleetPy.run_examples import run_scenarios
-
-# import functions from FleetPy
-# import functions from FleetMaaS - conversion scripts
-
 
 def single_pararun(one_slice, *args):
     # function to be used with optimize brute
@@ -149,12 +146,12 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         all_pax = mode_filter(inData, params)
         inData.passengers = all_pax[all_pax.mode_choice == "day-to-day"]
         inData.requests = inData.requests[inData.requests.index.isin(inData.passengers.index)]
-        inData.passengers.reset_index(drop=True, inplace=True)
-        inData.requests.reset_index(drop=True, inplace=True)
-        inData.requests['pax_id'] = inData.requests.index
     else:
         all_pax = inData.passengers.copy()
-        all_pax['mode_choice'] == "day-to-day"
+        all_pax['mode_choice'] = "day-to-day"
+    inData.passengers.reset_index(drop=True, inplace=True)
+    inData.requests.reset_index(drop=True, inplace=True)
+    inData.requests['pax_id'] = inData.requests.index
 
     # Generate information available to travellers at the start of the simulation, and whether travellers are willing to multi-home
     inData.passengers['informed'] = np.random.rand(len(inData.passengers)) < params.evol.travellers.inform.prob_start
@@ -182,8 +179,19 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         if not os.path.exists(os.path.join(fleetpy_dir, "data", "networks", network_name)):
             graphml_file = params.paths.G
             create_network_from_graphml(graphml_file, network_name)
+        # Determine which MaaSSim nodes are in which zones
+        zone_name = params.city.split(",")[0]
+        inData.nodes['geometry'] = geopandas.points_from_xy(inData.nodes['x'],inData.nodes['y'])
+        zones = geopandas.read_file(os.path.join(fleetpy_dir, "data", "zones", zone_name, "polygon_definition.geojson"))
+        inData.nodes["zone_id"] = inData.nodes.apply(lambda row: get_init_zone_id(row, zones), axis=1)
         constant_config_file = os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file))
-        sim = repl_sim_object(inData, params=params, **kwargs)  # initialize MaaSSim simulator object to which FleetPy results are returned
+        # Add zone id to passenger df
+        inData.passengers['zone_id'] = inData.passengers.apply(lambda x: inData.nodes.zone_id.loc[x.pos], axis=1)
+        # Expected (perceived) demand per zone (for the first day)
+        perc_demand = pd.DataFrame(index=zones.zone_id, columns=['requests'])
+        perc_demand.requests = 1 # assume equal demand in all zones for first day
+        # Initialize MaaSSim simulator object to which FleetPy results are returned
+        sim = repl_sim_object(inData, params=params, **kwargs)  
     else: # initialise MaaSSim within-day simulator
         sim = Simulator(inData, params=params,
                     kpi_veh = D2D_veh_exp,
@@ -244,7 +252,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
             # FleetPy init: conversion from MaaSSim data structure
             fp_run_id = scn_name + '-day-{}'.format(day) # id in FleetPy
-            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, fp_run_id, demand_name, params)
+            transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, fp_run_id, demand_name, params, zone_system_name=zone_name, exp_zone_demand=perc_demand)
 
             # Run FleetPy model
             scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{fp_run_id}.csv")
@@ -252,6 +260,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
             # FleetPy results: convert back to MaaSSim structure (simulator object) #TODO: o.a. indicators per platform, expected in-vehicle time, multi-homing vs single-homing
             sim = transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_run_id, inData)
+            perc_demand = learn_demand(inData, params, zones, perc_demand)
 
         #----- Post-day -----#
         # Determine key KPIs

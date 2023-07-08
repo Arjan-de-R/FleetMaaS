@@ -110,6 +110,13 @@ def create_network_from_graphml(graphml_file, network_name):
     create_travel_time_table(network_dir, scenario_time=None, save_npy=True, save_csv=False)
     
 
+def get_init_zone_id(row, gpd_zones):
+    '''function for determining zone id of specific node'''
+    for zone_id, zone_attrib in gpd_zones.iterrows():
+        if row.geometry.within(zone_attrib.geometry):
+            return zone_id
+
+
 if __name__ == "__main__":
     graphml_file = r"C:\Users\ge37ser\Documents\Coding\TUM_VT_FleetSimulation\tum-vt-fleet-simulation\FleetPy\studies\maasim_fleetpy_trb24\preprocessing\delft_test_network\Delft.graphml"
     network_name = "delft"

@@ -22,7 +22,7 @@ def convert_platform_encoding(platforms_str):
 
 
 def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name,
-                                     demand_name, zone_system_name, exp_zone_demand, d2d_params):
+                                     demand_name, d2d_params, zone_system_name=None, exp_zone_demand=None):
     """This function transforms the output files of the day-to-day model for the within-day (FleetPy) model.
 
     :param dtd_result_dir: result directory of last day-to-day iteration
@@ -81,7 +81,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         # valid throughout the time interval
         fc_df = exp_zone_demand.copy()
         fc_df["time"] = start_time
-        fc_df.rename({"expected_demand": "out perfect_trips"}, axis=1, inplace=True)
+        fc_df.rename({"requests": "out perfect_trips"}, axis=1, inplace=True)
         fc_df["out perfect_pax"] = fc_df["out perfect_trips"]
         # no incoming / supply forecasts
         fc_df["in perfect_trips"] = 0
@@ -162,7 +162,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     if fpy_fc_rq_f:
         sc_df_list[0].update({
             G_ZONE_SYSTEM_NAME: zone_system_name,
-            G_FC_FNAME: fpy_fc_rq_f,
+            G_FC_FNAME: f"{new_wd_scenario_name}.csv",
             G_FC_TYPE: "perfect_trips",
             G_FC_TR: end_time
         })

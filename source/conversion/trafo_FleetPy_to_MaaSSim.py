@@ -6,7 +6,7 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     '''This function transforms the output files of the within-day model (FleetPy) for the day-to-day (MaaSSim) model'''
     result_dir = os.path.join(fleetpy_dir, 'studies', fleetpy_study_name, 'results', fp_run_id) # where are the results stored
 
-    # 1) Load traveller KPIs
+    # 1) Load traveller KPIs # TODO: what if there are no users?
     req_kpis = pd.read_csv(os.path.join(result_dir,'1_user-stats.csv'), index_col = 'request_id')
     pax_exp = pd.DataFrame(index = req_kpis.index)
     pax_exp.index.name = 'pax'
@@ -29,9 +29,17 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     sim.last_res.pax_exp = pax_exp.copy() # store in MaaSSim simulator object
 
     # 2) Load driver KPIs
-    aggr_kpis = pd.read_csv(os.path.join(result_dir,'standard_mod-0_veh_eval.csv'), index_col = 0).set_index('driver_id')  # platform 0 # TODO: how do we handle when no driver works (and same for travs)
+    aggr_kpis = pd.read_csv(os.path.join(result_dir,'standard_mod-0_veh_eval.csv'), index_col = 0)
+    if not aggr_kpis.empty: # at least one driver for this platform
+        aggr_kpis = aggr_kpis.set_index('driver_id')  # platform 0
+    else:
+        aggr_kpis = pd.DataFrame(columns=['type','total km','total kWh','total CO2 [g]','fix costs','total variable costs','revenue','driver_id','km occ 0','km occ 1'])
     if len(inData.platforms.index) == 2: # aggegate kpi's from both platforms
-        driver_kpis_1 = pd.read_csv(os.path.join(result_dir,'standard_mod-1_veh_eval.csv'), index_col = 0).set_index('driver_id')  # platform 1
+        driver_kpis_1 = pd.read_csv(os.path.join(result_dir,'standard_mod-1_veh_eval.csv'), index_col = 0)
+        if not driver_kpis_1.empty:
+            driver_kpis_1 = driver_kpis_1.set_index('driver_id')  # platform 1
+        else:
+            driver_kpis_1 = pd.DataFrame(columns=['type','total km','total kWh','total CO2 [g]','fix costs','total variable costs','revenue','driver_id','km occ 0','km occ 1'])
         aggr_kpis = pd.concat([aggr_kpis, driver_kpis_1])
         aggr_kpis = aggr_kpis.groupby('driver_id').sum()
     veh_exp = pd.DataFrame(index = aggr_kpis.index)
