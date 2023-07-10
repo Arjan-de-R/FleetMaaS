@@ -161,7 +161,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
-    fixed_supply = set_multihoming_drivers(fixed_supply, params)
+    
+    # correct 
     inData.vehicles = fixed_supply.copy()
     
     # Load path
@@ -237,8 +238,14 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             inData.vehicles = work_preday(inData.vehicles, params)
 
             # Determine which platform(s) agents can use
+            df_veh = inData.vehicles.copy()
+            df_veh['regist_plf'] = df_veh.apply(lambda row: np.array(list(map(lambda x: x=='True', row.registered.split(";")))), axis=1)
+            df_veh['ptcp_plf'] = df_veh.apply(lambda row: row.ptcp * row.regist_plf, axis=1)
+            df_veh['ptcp_plf_index'] = df_veh.apply(lambda row: row.ptcp_plf.nonzero()[0], axis=1)
+            df_veh['ptcp_plf_index_string'] = df_veh.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.ptcp_plf_index, flags=['zerosize_ok'])), axis=1)
+            inData.vehicles.platform = df_veh['ptcp_plf_index_string']
             mh_coding = ['0', '0;1']    # multi-homing coding depending on the number of service providers - works for 1 or 2 service providers #TODO: expand to more providers
-            inData.vehicles.platform = inData.vehicles.apply(lambda x: mh_coding[params.nS - 1] if x.ptcp else ';', axis=1)
+            # inData.vehicles.platform = inData.vehicles.apply(lambda x: mh_coding[params.nS - 1] if x.ptcp else ';', axis=1)
             inData.passengers.platforms = inData.passengers.apply(lambda x: mh_coding[params.nS - 1] if x.mode_day == 'rs' else ';', axis=1)
 
             # Generate input csv's for FleetPy
