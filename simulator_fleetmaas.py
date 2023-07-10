@@ -203,6 +203,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     # Where are the (final) results of the day-to-day simulation be stored
     scn_name = kwargs.get('scn_name')
+    if not os.path.exists(os.path.join(path,'results')):
+        os.mkdir(os.path.join(path,'results'))
     sim_zip = zipfile.ZipFile(os.path.join(path, 'results', '{}.zip'.format(scn_name)), 'w')
     params.t0 = str(params.t0)
     with open('params_{}.json'.format(scn_name), 'w') as file:
@@ -237,11 +239,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             # Pre-day work choice
             inData.vehicles = work_preday(inData.vehicles, params)
 
-            # Determine which platform(s) agents can use
+            # Determine which platform(s) agents can use - using right FleetPy coding
             df_veh = inData.vehicles.copy()
-            df_veh['regist_plf'] = df_veh.apply(lambda row: np.array(list(map(lambda x: x=='True', row.registered.split(";")))), axis=1)
-            df_veh['ptcp_plf'] = df_veh.apply(lambda row: row.ptcp * row.regist_plf, axis=1)
-            df_veh['ptcp_plf_index'] = df_veh.apply(lambda row: row.ptcp_plf.nonzero()[0], axis=1)
+            # df_veh['regist_plf'] = df_veh.apply(lambda row: np.array(list(map(lambda x: x=='True', row.registered.split(";")))), axis=1)
+            # df_veh['ptcp_plf'] = df_veh.apply(lambda row: row.ptcp * row.regist_plf, axis=1)
+            df_veh['ptcp_plf_index'] = df_veh.apply(lambda row: row.ptcp.nonzero()[0], axis=1)
             df_veh['ptcp_plf_index_string'] = df_veh.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.ptcp_plf_index, flags=['zerosize_ok'])), axis=1)
             inData.vehicles.platform = df_veh['ptcp_plf_index_string']
             mh_coding = ['0', '0;1']    # multi-homing coding depending on the number of service providers - works for 1 or 2 service providers #TODO: expand to more providers
@@ -251,6 +253,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             # Generate input csv's for FleetPy
             dtd_result_dir = os.path.join(path, 'temp_res','{}'.format(scn_name))
             if not os.path.exists(dtd_result_dir):
+                if not os.path.exists(os.path.join(path,'temp_res')):
+                    os.mkdir(os.path.join(path,'temp_res'))
                 os.mkdir(dtd_result_dir)
             inData.requests.to_csv(os.path.join(dtd_result_dir,'inData_requests.csv'))
             inData.passengers.to_csv(os.path.join(dtd_result_dir,'inData_passengers.csv')) 

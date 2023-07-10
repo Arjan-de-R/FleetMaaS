@@ -29,35 +29,33 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     sim.last_res.pax_exp = pax_exp.copy() # store in MaaSSim simulator object
 
     # 2) Load driver KPIs
-    aggr_kpis = pd.read_csv(os.path.join(result_dir,'standard_mod-0_veh_eval.csv'), index_col = 0)
-    if not aggr_kpis.empty: # at least one driver for this platform
-        aggr_kpis = aggr_kpis.set_index('driver_id')  # platform 0
-    else:
-        aggr_kpis = pd.DataFrame(columns=['type','total km','total kWh','total CO2 [g]','fix costs','total variable costs','revenue','driver_id','km occ 0','km occ 1'])
-    if len(inData.platforms.index) == 2: # aggegate kpi's from both platforms
-        driver_kpis_1 = pd.read_csv(os.path.join(result_dir,'standard_mod-1_veh_eval.csv'), index_col = 0)
-        if not driver_kpis_1.empty:
-            driver_kpis_1 = driver_kpis_1.set_index('driver_id')  # platform 1
+    aggr_kpis = pd.DataFrame(columns=['type','total km','total kWh','total CO2 [g]','fix costs','total variable costs','revenue','driver_id','km occ 0','km occ 1'])
+    aggr_kpis = aggr_kpis.set_index('driver_id')
+    for plf in inData.platforms.index:
+        plf_kpis = pd.read_csv(os.path.join(result_dir,'standard_mod-{}_veh_eval.csv'.format(plf)), index_col = 0)
+        if not plf_kpis.empty: # at least one driver for this platform
+            plf_kpis = plf_kpis.set_index('driver_id')  # platform 0
         else:
-            driver_kpis_1 = pd.DataFrame(columns=['type','total km','total kWh','total CO2 [g]','fix costs','total variable costs','revenue','driver_id','km occ 0','km occ 1'])
-        aggr_kpis = pd.concat([aggr_kpis, driver_kpis_1])
-        aggr_kpis = aggr_kpis.groupby('driver_id').sum()
+            plf_kpis = pd.DataFrame(columns=['type','total km','total kWh','total CO2 [g]','fix costs','total variable costs','revenue','driver_id','km occ 0','km occ 1'])
+        aggr_kpis = pd.concat([aggr_kpis, plf_kpis])
+    aggr_kpis = aggr_kpis.groupby('driver_id').sum()
     veh_exp = pd.DataFrame(index = aggr_kpis.index)
-    veh_exp['NET_INCOME'] = (aggr_kpis.revenue - aggr_kpis['total variable costs']) / 100
-    veh_exp['OUT'] = False # participation choice is already done before FleetPy run, so all participate
-    veh_exp['FORCED_OUT'] = False
+    veh_exp['NET_INCOME'] = (aggr_kpis.revenue - aggr_kpis['total variable costs']) / 100 # TODO: consider repositioning costs in detemrination of income
+
     # Now we add drivers that did not work today
     all_drivers = inData.vehicles.index.values
     ptcp_drivers = veh_exp.index.values
     noptcp_drivers = list(set(all_drivers) - set(ptcp_drivers))
-    kpis_no_ptcp = {'NET_INCOME': np.nan, 'OUT': True, 'FORCED_OUT': False}
+    kpis_no_ptcp = {'NET_INCOME': np.nan}
     no_ptcp_df = pd.DataFrame.from_dict(kpis_no_ptcp, orient='index').transpose()
     no_ptcp_df = pd.DataFrame(np.repeat(no_ptcp_df.to_numpy(), len(noptcp_drivers), axis=0), columns=no_ptcp_df.columns) # repeat same row for all drivers that did not work
-    no_ptcp_df = no_ptcp_df.astype(dtype= {"NET_INCOME":"float64", "OUT":"bool", "FORCED_OUT":"bool"})
+    no_ptcp_df = no_ptcp_df.astype(dtype= {"NET_INCOME":"float64"})
     no_ptcp_df['driver_id'] = noptcp_drivers
     no_ptcp_df = no_ptcp_df.set_index('driver_id')
     veh_exp = pd.concat([veh_exp,no_ptcp_df]).sort_index()
     veh_exp.index.name = 'veh'
+    veh_exp['OUT'] = inData.vehicles.apply(lambda row: ~row.ptcp, axis=1)
+    veh_exp['FORCED_OUT'] = False # TODO: implement registration cap to work with multiple platforms
     sim.last_res.veh_exp = veh_exp.copy()
 
     # 3) Save inData to simulator object

@@ -6,20 +6,22 @@ import random
 def work_preday(vehicles, params):
     '''determines which job seekers participate on a given day, a pre-day alternative to the within-day D2D_driver_out function in MaaSSim''' 
     
+    vehicles['ptcp'] = None
+    vehicles['ptcp'] = vehicles.ptcp.astype(object)
     for index, row in vehicles.iterrows():
         util_nd = params.evol.drivers.particip.beta * row.res_wage
-        expected_income_list = list(map(float,row.expected_income.split(";"))) # income for each platform
-        regist_list = row.registered.split(";") # which platforms is the job seeker registered with
-        registered = (sum([i == 'True' for i in regist_list]) > 0) # registered with at least one platform
+        registered_anywhere = (row.registered.sum() > 0) # registered with at least one platform
         if row.multihoming:
-            expected_income = sum([0 if math.isnan(i) else i for i in expected_income_list]) # income of all platforms together
+            expected_income = row.expected_income.sum() # income of all platforms together
         else:
-            registered_plf = np.array([i == 'True' for i in regist_list])
-            if registered_plf.sum() == 1: # registered with a platform
-                expected_income = np.array(expected_income_list)[registered_plf][0]
+            if registered_anywhere: # registered with a platform
+                expected_income = row.expected_income[row.registered][0]
+            else:
+                expected_income = -999 # not further used (probability returns 0 later)
         util_d = params.evol.drivers.particip.beta * expected_income
-        prob_d = (np.exp(util_d) / (np.exp(util_d) + np.exp(util_nd))) * registered
-        vehicles.loc[index,'ptcp'] = prob_d < random.random()
+        prob_d = (np.exp(util_d) / (np.exp(util_d) + np.exp(util_nd))) * registered_anywhere
+        ptcp = prob_d < random.random()
+        vehicles.at[index, 'ptcp'] = ptcp * row.registered
 
     return vehicles
 

@@ -96,7 +96,6 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         fpy_fc_rq_f = None
 
     # 2) create driver/vehicle data file
-    # TODO # specification of input file and codes for initialization (and rest)
     driver_f = os.path.join(dtd_result_dir, "inData_vehicles.csv")
     driver_df = pd.read_csv(driver_f, index_col=0)
     driver_df.index.name = "driver_id"
@@ -104,8 +103,9 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     #driver_id,veh_type,possible_operators,start_node,operating_times
     fp_driver_df_list = []
     for driver_id, driver_row in driver_df.iterrows():
-        platforms = convert_platform_encoding(driver_row["platform"])
-        if platforms is None:
+        # platforms = convert_platform_encoding(driver_row["platform"])
+        platforms = driver_row["platform"]
+        if pd.isnull(platforms):
             continue
         fp_driver_df_list.append({
             "driver_id" : driver_id,
