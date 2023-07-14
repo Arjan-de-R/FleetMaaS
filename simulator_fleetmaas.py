@@ -241,8 +241,6 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
             # Determine which platform(s) agents can use - using right FleetPy coding
             df_veh = inData.vehicles.copy()
-            # df_veh['regist_plf'] = df_veh.apply(lambda row: np.array(list(map(lambda x: x=='True', row.registered.split(";")))), axis=1)
-            # df_veh['ptcp_plf'] = df_veh.apply(lambda row: row.ptcp * row.regist_plf, axis=1)
             df_veh['ptcp_plf_index'] = df_veh.apply(lambda row: row.ptcp.nonzero()[0], axis=1)
             df_veh['ptcp_plf_index_string'] = df_veh.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.ptcp_plf_index, flags=['zerosize_ok'])), axis=1)
             inData.vehicles.platform = df_veh['ptcp_plf_index_string']
@@ -283,18 +281,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.vehicles.work_exp = exp_df.work_exp
 
         # Supply-side diffusion of platform information
-        res_inf_driver = wom_driver(inData, params=params)
-        inData.vehicles.informed = res_inf_driver   # which job seekers are informed about ride-hailing
-        inData.vehicles.expected_income = learning_unregist(inData, drivers_summary, params = params) # determine what income do unregistered job seekers expect based on communication with others
+        inData.vehicles.informed = wom_driver(inData, params=params)   # which job seekers are informed about ride-hailing
         
         # (De-)registration decisions
-        res_regist = platform_regist(inData, drivers_summary, params=params)
-        inData.vehicles.registered = res_regist.registered
-        inData.vehicles.work_exp = res_regist.work_exp
-        inData.vehicles.days_since_reg = res_regist.days_since_reg
-        # inData.vehicles.expected_income = res_regist.expected_income # TODO: does it need to be included?
+        inData.vehicles = platform_regist(inData, drivers_summary, params=params)
         inData.vehicles.pos = fixed_supply.pos
-        inData.vehicles.rejected_reg = res_regist.rejected_reg
 
         # Demand-side diffusion of platform information
         res_inf_trav = wom_trav(inData, travs_summary, params=params)

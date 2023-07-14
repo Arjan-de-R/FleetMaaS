@@ -100,17 +100,15 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     driver_df = pd.read_csv(driver_f, index_col=0)
     driver_df.index.name = "driver_id"
     print(driver_df.head())
-    #driver_id,veh_type,possible_operators,start_node,operating_times
     fp_driver_df_list = []
     for driver_id, driver_row in driver_df.iterrows():
-        # platforms = convert_platform_encoding(driver_row["platform"])
         platforms = driver_row["platform"]
         if pd.isnull(platforms):
             continue
         fp_driver_df_list.append({
             "driver_id" : driver_id,
             "start_node" : source_to_node_id[driver_row["pos"]],  
-            "possible_operators" : platforms,   # TODO how is encoding for multiple operators?
+            "possible_operators" : platforms, 
             "operating_times" : f"{driver_row['shift_start']};{driver_row['shift_end']}",
             "veh_type" : "default_vehtype" # TODO?
         })

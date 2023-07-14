@@ -29,18 +29,28 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     sim.last_res.pax_exp = pax_exp.copy() # store in MaaSSim simulator object
 
     # 2) Load driver KPIs
-    aggr_kpis = pd.DataFrame(columns=['type','total km','total kWh','total CO2 [g]','fix costs','total variable costs','revenue','driver_id','km occ 0','km occ 1'])
+    # find all columns included in platform output files (i.e. including highest occupancy)
+    all_col_names = []
+    for plf in np.arange(len(inData.platforms.index)+1): # additional platform is for multi-homer repositioning (not associated with an actual platform)
+        plf_kpis = pd.read_csv(os.path.join(result_dir,'standard_mod-{}_veh_eval.csv'.format(plf)), index_col = 0)
+        col_names = plf_kpis.columns.values.tolist()
+        all_col_names = all_col_names + list(set(col_names).difference(all_col_names))
+       
+    aggr_kpis = pd.DataFrame(columns=all_col_names)
     aggr_kpis = aggr_kpis.set_index('driver_id')
-    for plf in inData.platforms.index:
+    for plf in np.arange(len(inData.platforms.index)+1): # additional platform is for multi-homer repositioning (not associated with an actual platform)
         plf_kpis = pd.read_csv(os.path.join(result_dir,'standard_mod-{}_veh_eval.csv'.format(plf)), index_col = 0)
         if not plf_kpis.empty: # at least one driver for this platform
-            plf_kpis = plf_kpis.set_index('driver_id')  # platform 0
+            # check which columns are missing
+            missing_cols = list(set(all_col_names).difference(plf_kpis.columns.values.tolist()))
+            plf_kpis[missing_cols] = 0
+            plf_kpis = plf_kpis.set_index('driver_id')
         else:
-            plf_kpis = pd.DataFrame(columns=['type','total km','total kWh','total CO2 [g]','fix costs','total variable costs','revenue','driver_id','km occ 0','km occ 1'])
+            plf_kpis = pd.DataFrame(columns=all_col_names)
         aggr_kpis = pd.concat([aggr_kpis, plf_kpis])
     aggr_kpis = aggr_kpis.groupby('driver_id').sum()
     veh_exp = pd.DataFrame(index = aggr_kpis.index)
-    veh_exp['NET_INCOME'] = (aggr_kpis.revenue - aggr_kpis['total variable costs']) / 100 # TODO: consider repositioning costs in detemrination of income
+    veh_exp['NET_INCOME'] = (aggr_kpis.revenue - aggr_kpis['total variable costs']) / 100
 
     # Now we add drivers that did not work today
     all_drivers = inData.vehicles.index.values
