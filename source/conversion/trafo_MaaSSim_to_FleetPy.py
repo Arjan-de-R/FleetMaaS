@@ -9,6 +9,19 @@ def _create_seconds_of_day(dt_str):
     hour, minute, second =  [int(x) for x in dt_str.split(" ")[1].split(":")]
     return 3600 * hour + 60 * minute + second
 
+def platform_data_conversion(platform_data):
+    """This function converts the platform data from the MaaSSim format to the FleetPy format.
+
+    :param platform_data: platform data from MaaSSim
+    :return: platform data for FleetPy
+    """
+    if type(platform_data) != str:
+        return str(int(platform_data))
+    else:
+        platform_list = platform_data.split(";")
+        platform_list = [str(int(float(x))) for x in platform_list]
+        return ";".join(platform_list)
+
 
 def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name,
                                      demand_name, d2d_params, zone_system_name=None, exp_zone_demand=None):
@@ -43,6 +56,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     f_df['end'] = f_df['destination'].apply(lambda x: source_to_node_id[x])
     fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]]
     fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
+    fpy_rq_df["platforms"] = fpy_rq_df["platforms"].apply(platform_data_conversion)
     fpy_rq_df.rename({"rq_id": "request_id", "VoT": "value_of_time", "platforms" : "user_list_operators"}, axis=1, inplace=True) # rename
     fpy_rq_df.sort_values("rq_time", inplace=True)
 
@@ -91,6 +105,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         platforms = driver_row["platform"]
         if pd.isnull(platforms):
             continue
+        platforms = platform_data_conversion(platforms)
         fp_driver_df_list.append({
             "driver_id" : driver_id,
             "start_node" : source_to_node_id[driver_row["pos"]],  
