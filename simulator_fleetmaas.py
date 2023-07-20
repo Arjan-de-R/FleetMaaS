@@ -59,6 +59,11 @@ def single_pararun(one_slice, *args):
         scn_name += '-{}-{}'.format(key, value)
     scn_name = re.sub('[^-a-zA-Z0-9_.() ]+', '', scn_name)[1:]
 
+    # Set-up simulation log
+    if not os.path.exists('results'):
+        os.mkdir('results')
+    if not os.path.exists(os.path.join('results',scn_name)):
+        os.mkdir(os.path.join('results',scn_name))
     logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     filename=os.path.join('results','{}'.format(scn_name), '00_simulation.log'),  # File to save logs
