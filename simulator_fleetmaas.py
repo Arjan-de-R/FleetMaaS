@@ -220,6 +220,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     if not os.path.exists(os.path.join(path,'results',scn_name)):
         os.mkdir(os.path.join(path,'results',scn_name))
     result_path = os.path.join(path, 'results', scn_name)
+    params.t0 = params.t0.to_pydatetime().strftime('%Y-%m-%d %H:%M:%S')
     with open(os.path.join(result_path, '0_params.json'), 'w') as json_file:
         json.dump(params, json_file)
     
