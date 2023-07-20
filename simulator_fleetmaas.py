@@ -12,6 +12,7 @@ from source.conversion.trafo_FleetPy_to_MaaSSim import *
 from source.conversion.trafo_MaaSSim_to_FleetPy import *
 from source.d2d.supply import *
 from source.d2d.demand import *
+from source.d2d.platform import *
 
 MAIN_DIR = os.path.dirname(__file__)
 ABS_MAIN_DIR = os.path.abspath(MAIN_DIR)
@@ -33,7 +34,6 @@ from MaaSSim.src_MaaSSim.d2d_demand import *
 from MaaSSim.src_MaaSSim.d2d_supply import *
 from MaaSSim.src_MaaSSim.decisions import dummy_False
 from source.d2d.reproduce_MS_simulator import repl_sim_object
-
 import zipfile
 import json
 import geopandas
@@ -52,9 +52,17 @@ def single_pararun(one_slice, *args):
         _params = return_scn_params(params, key, val)
 
     scn_name = ''
+    if params.platforms.service_types:
+        cmpt_type_string = "".join([item[0] for item in params.platforms.service_types])
+        scn_name = '-{}'.format(cmpt_type_string)
     for key, value in stamp.items():
         scn_name += '-{}-{}'.format(key, value)
     scn_name = re.sub('[^-a-zA-Z0-9_.() ]+', '', scn_name)[1:]
+
+    logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    filename=os.path.join('results','{}'.format(scn_name), '00_simulation.log'),  # File to save logs
+                    filemode='a')       # Append mode for the log file
 
     sim = simulate(inData=_inData, params=_params, logger_level=logging.WARNING, scn_name = scn_name)
 
@@ -128,19 +136,19 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     # Set properties of platform(s)
     inData.platforms = pd.concat([inData.platforms,pd.DataFrame(columns=['base_fare','comm_rate','min_fare','match_obj','max_wait_time','max_rel_detour'])])
     inData.platforms = initialize_df(inData.platforms)
-    inData.platforms.loc[0]=[params.platforms.fare,'Platform 0',30,params.platforms.base_fare,params.platforms.comm_rate,params.platforms.min_fare,params.platforms.match_obj,params.platforms.max_wait_time,params.platforms.max_rel_detour,]
-    for plat_id in range(1,params.get('nS', 1)): # more than 1 platform
-        inData.platforms.loc[plat_id]=[params.platforms.get('fare_{}'.format(plat_id),params.platforms.fare),'Platform {}'.format(plat_id),30,
-                                    params.platforms.get('base_fare_{}'.format(plat_id),params.platforms.base_fare),
-                                    params.platforms.get('comm_rate_{}'.format(plat_id), params.platforms.comm_rate),
-                                    params.platforms.get('min_fare_{}'.format(plat_id),params.platforms.min_fare),
-                                    params.platforms.get('match_obj_{}'.format(plat_id),params.platforms.match_obj),
-                                    params.platforms.get('max_wait_time_{}'.format(plat_id),params.platforms.max_wait_time),
-                                    params.platforms.get('max_rel_detour_{}'.format(plat_id),params.platforms.max_rel_detour)]
+    if not params.platforms.get('service_types'): # if service type(s) are not provided
+        params.platforms.service_types = ['solo']
+    for plat_id in range(0,len(params.platforms.service_types)):
+        # initialise solo platform
+        if params.platforms.service_types[plat_id] == 'solo':
+            inData.platforms.loc[plat_id] = init_solo_plf(params, plat_id)
+        else:
+            inData.platforms.loc[plat_id] = init_pooling_plf(params, plat_id)
 
     # Generate mode preferences
     inData.passengers = prefs_travs(inData, params)
 
+    all_req = inData.requests.copy()
     # Determine whether to consider all generated requests in day-to-day simulation or only those that are relatively likely to consider ride-hailing
     if params.evol.travellers.get('min_prob', 0) > 0:
         all_pax = mode_filter(inData, params)
@@ -154,10 +162,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.requests['pax_id'] = inData.requests.index
 
     # Generate information available to travellers at the start of the simulation, and whether travellers are willing to multi-home
-    inData.passengers['informed'] = np.random.rand(len(inData.passengers)) < params.evol.travellers.inform.prob_start
-    inData.passengers['expected_wait'] = params.evol.travellers.inform.start_wait
-    inData.passengers = start_regist_travs(inData.passengers, params)
     inData.passengers = set_multihoming_travellers(inData.passengers, params)
+    inData.passengers['informed'] = np.random.rand(len(inData.passengers)) < params.evol.travellers.inform.prob_start
+    inData.passengers = start_regist_travs(inData, params)
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
@@ -205,23 +212,28 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     scn_name = kwargs.get('scn_name')
     if not os.path.exists(os.path.join(path,'results')):
         os.mkdir(os.path.join(path,'results'))
-    sim_zip = zipfile.ZipFile(os.path.join(path, 'results', '{}.zip'.format(scn_name)), 'w')
-    params.t0 = str(params.t0)
-    with open('params_{}.json'.format(scn_name), 'w') as file:
-        json.dump(params, file)
-    sim_zip.write('params_{}.json'.format(scn_name))
-    os.remove('params_{}.json'.format(scn_name))
-    # df_req = inData.requests[['pax_id','origin','destination','treq','dist']]
-    # if 'haver_dist' in inData.requests.columns:
-        # df_req['haver_dist'] = inData.requests['haver_dist']
-    # df_pax = inData.passengers[['VoT','U_car','U_pt','U_bike']]
-    # df = pd.concat([df_req, df_pax], axis=1)
-    # sim_zip.writestr("requests.csv", df.to_csv()) 
-    # sim_zip.writestr("PT_itineraries.csv", inData.pt_itinerary.to_csv())
-    # sim_zip.writestr("vehicles.csv", inData.vehicles[['pos','res_wage']].to_csv())
-    sim_zip.writestr("platforms.csv", inData.platforms.to_csv())
-    sim_zip.writestr("all_pax.csv", all_pax.to_csv())
-    evol_micro = init_d2d_dotmap()
+    if not os.path.exists(os.path.join(path,'results',scn_name)):
+        os.mkdir(os.path.join(path,'results',scn_name))
+    result_path = os.path.join(path, 'results', scn_name)
+    with open(os.path.join(result_path, '0_params.json'), 'w') as json_file:
+        json.dump(params, json_file)
+    
+    df_req = inData.requests[['pax_id','origin','destination','treq','dist','ttrav']]
+    if 'haver_dist' in inData.requests.columns:
+        df_req['haver_dist'] = inData.requests['haver_dist']
+    df_pax = inData.passengers[['VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike','multihoming']]
+    pd.concat([df_req, df_pax], axis=1).to_csv(os.path.join(result_path,'1_pax-properties.csv'))
+    inData.vehicles[['pos', 'res_wage', 'multihoming']].to_csv(os.path.join(result_path,'2_driver-properties.csv'))
+    inData.platforms.to_csv(os.path.join(result_path, '3_platform-properties.csv'))
+    all_pax_df = pd.concat([all_req, all_pax], axis=1)
+    all_pax_df[all_pax_df.mode_choice != 'day-to-day']
+    all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
+    del all_pax, all_req, all_pax_df
+
+    # Initialise convergence
+    last_avg_perc_util_plf_travs = [-999] * len(inData.platforms.index)
+    last_avg_perc_util_plf_drivers = [-999] * len(inData.platforms.index)
+    steady_days = 0
 
     # Day-to-day simulator
     for day in range(params.get('nD', 1)):  # run iterations
@@ -244,9 +256,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             df_veh['ptcp_plf_index'] = df_veh.apply(lambda row: row.ptcp.nonzero()[0], axis=1)
             df_veh['ptcp_plf_index_string'] = df_veh.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.ptcp_plf_index, flags=['zerosize_ok'])), axis=1)
             inData.vehicles.platform = df_veh['ptcp_plf_index_string']
-            mh_coding = ['0', '0;1']    # multi-homing coding depending on the number of service providers - works for 1 or 2 service providers #TODO: expand to more providers
-            # inData.vehicles.platform = inData.vehicles.apply(lambda x: mh_coding[params.nS - 1] if x.ptcp else ';', axis=1)
-            inData.passengers.platforms = inData.passengers.apply(lambda x: mh_coding[params.nS - 1] if x.mode_day == 'rs' else ';', axis=1)
+            df_pax = inData.passengers.copy()
+            df_pax['chosen_plf_index'] = df_pax.apply(lambda row: np.where((row.mode_day == 'rs') * row.registered)[0], axis=1)
+            df_pax['chosen_plf_index_string'] = df_pax.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.chosen_plf_index, flags=['zerosize_ok'])), axis=1)
+            inData.passengers.platforms = df_pax.chosen_plf_index_string
 
             # Generate input csv's for FleetPy
             dtd_result_dir = os.path.join(path, 'temp_res','{}'.format(scn_name))
@@ -274,7 +287,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         #----- Post-day -----#
         # Determine key KPIs
         drivers_summary = update_d2d_drivers(sim=sim, params=params)
-        travs_summary = update_d2d_travellers(sim=sim, params=params)
+        travs_summary = update_d2d_travellers(sim=sim, params=params, pax=inData.passengers)
         
         # Update work experience of job seekers
         exp_df = update_work_exp(inData, drivers_summary)   # number of days work experience
@@ -290,23 +303,46 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Demand-side diffusion of platform information
         res_inf_trav = wom_trav(inData, travs_summary, params=params)
         inData.passengers.informed = res_inf_trav.informed
-        inData.passengers.expected_wait = res_inf_trav.perc_wait
+        inData = platform_regist_trav(inData, travs_summary, params=params)
 
         # Store KPIs of day
-        evol_micro = d2d_summary_day(evol_micro, drivers_summary, travs_summary, day)
+        dem_df, sup_df = d2d_summary_day(drivers_summary, travs_summary)
+        dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))
+        sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
+
+        # Determine convergence
+        df_pax = inData.passengers[['VoT', 'ASC_rs', 'ASC_pool']]
+        df_pax[['new_perc_wait', 'new_perc_ivt', 'new_perc_fare']] = travs_summary[['new_perc_wait','new_perc_ivt','new_perc_fare']]
+        df_pax['perc_util_plf'] = df_pax.apply(lambda row: util_plfs(inData, params, row), axis=1)
+        avg_perc_util_plf_travs = []
+        df_veh = drivers_summary[['new_perc_inc']]
+        df_veh['perc_util_plf'] = df_veh.apply(lambda row: params.evol.drivers.particip.beta * row.new_perc_inc, axis=1)
+        avg_perc_util_plf_drivers = []
+        for plf in inData.platforms.index:
+            avg_util_trav = df_pax.apply(lambda row: row.perc_util_plf[plf], axis=1).mean()
+            avg_perc_util_plf_travs = avg_perc_util_plf_travs + [avg_util_trav]
+            avg_util_driver = df_veh.apply(lambda row: row.perc_util_plf[plf], axis=1).mean()
+            avg_perc_util_plf_drivers = avg_perc_util_plf_drivers + [avg_util_driver]
+        rel_change_util_travs = np.array(avg_perc_util_plf_travs) / np.array(last_avg_perc_util_plf_travs)
+        rel_change_util_drivers = np.array(avg_perc_util_plf_drivers) / np.array(last_avg_perc_util_plf_drivers)
+        if np.all(rel_change_util_travs < params.convergence.factor) and np.all(rel_change_util_drivers < params.convergence.factor): # steady for both sides on all platforms
+            steady_days +=1
+        else:
+            steady_days = 0
+        
+        # Log state of the market
+        log_change_util_travs = ["{:.2%}".format(value) for value in rel_change_util_travs.tolist()]
+        log_change_util_drivers = ["{:.2%}".format(value) for value in rel_change_util_drivers.tolist()]
+        logging.info('Scenario {} - Day {} ended.'.format(scn_name, day))
+        logging.info('Scenario {} - Rel. change in avg. perc. platform utility: travellers = {}, drivers = {}.'.format(scn_name,log_change_util_travs,log_change_util_drivers))
+        logging.info('Scenario {} - Number of steady days is now {}.'.format(scn_name,steady_days))
+        last_avg_perc_util_plf_travs = avg_perc_util_plf_travs
+        last_avg_perc_util_plf_drivers = avg_perc_util_plf_drivers
 
         # Stop criterion
-        if sim.functions.f_stop_crit(sim=sim):
+        if steady_days >= params.convergence.req_steady_days:
             break
 
-    # Compute aggregated statistics from individual agent results and store both       
-    evol_micro, evol_agg = d2d_agg_statistics(evol_micro)
-    for data_sup in ['inform', 'regist', 'ptcp', 'perc_inc', 'exp_inc']:
-        sim_zip.writestr("d2d_driver_{}.csv".format(data_sup), evol_micro.supply.toDict()[data_sup].to_csv())
-    for data_dem in ['inform', 'requests', 'wait_time', 'corr_wait_time', 'perc_wait', 'bike', 'car', 'pt']:
-        sim_zip.writestr("d2d_traveller_{}.csv".format(data_dem), evol_micro.demand.toDict()[data_dem].to_csv())
-    sim_zip.writestr("d2d_agg_supply.csv", evol_agg.supply.to_csv())
-    sim_zip.writestr("d2d_agg_demand.csv", evol_agg.demand.to_csv())
 
     return sim
 

@@ -2,6 +2,18 @@ import os
 import pandas as pd
 import numpy as np
 
+def offer_received(row):
+    '''determine which platforms give offer to traveller'''
+    offers = row.offers.split("|")
+    offer_received = []
+    for plf in range(len(offers)):
+        if len(offers[plf].split(":")) == 0:
+            offer_received = offer_received + [False]
+        else:
+            offer_received = offer_received + [True]
+    return np.array(offer_received)
+
+
 def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_run_id, inData):
     '''This function transforms the output files of the within-day model (FleetPy) for the day-to-day (MaaSSim) model'''
     result_dir = os.path.join(fleetpy_dir, 'studies', fleetpy_study_name, 'results', fp_run_id) # where are the results stored
@@ -10,23 +22,21 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     req_kpis = pd.read_csv(os.path.join(result_dir,'1_user-stats.csv'), index_col = 'request_id')
     pax_exp = pd.DataFrame(index = req_kpis.index)
     pax_exp.index.name = 'pax'
-    pax_exp['TRAVEL'] = req_kpis.dropoff_time - req_kpis.pickup_time # total travel time
+    pax_exp['TRAVEL'] = req_kpis.dropoff_time - req_kpis.pickup_time - 30 # total travel time
     pax_exp['WAIT'] = req_kpis.pickup_time - req_kpis.rq_time
-    pax_exp['OPERATIONS'] = 60 # 30 sec both for accessing and egressing the vehicle
+    pax_exp['OPERATIONS'] = 60 # 30 sec for accessing and egressing the vehicle
     pax_exp['detour'] = req_kpis.dropoff_time - req_kpis.pickup_time - req_kpis.direct_route_travel_time - pax_exp.OPERATIONS # detour time
     pax_exp['fare'] = req_kpis.fare / 100
     pax_exp['platform'] = req_kpis.operator_id
-    pax_exp['LOSES_PATIENCE'] = req_kpis.apply(lambda x: 999 if x.operator_id == '' else 0, axis=1) # used later in determining which travellers are rejected by platform
-    pax_exp['NO_REQUEST'] = False # True if another mode is chosen prior to the day
-    pax_exp['OTHER_MODE'] = False # True if request is made but received offers are rejected
+    pax_exp['LOSES_PATIENCE'] = req_kpis.apply(lambda row: ~offer_received(row), axis=1)
     # Now we add travellers that did not make a request
     all_travs = inData.passengers.index.values
     req_travs = pax_exp.index.values
     noreq_travs = list(set(all_travs) - set(req_travs))
     no_req_df = pd.DataFrame(np.nan, index=noreq_travs, columns=['TRAVEL','WAIT','OPERATIONS','detour','fare','platform','LOSES_PATIENCE'])
-    no_req_df['NO_REQUEST'], no_req_df['OTHER_MODE'] = [True, False]
+    no_req_df['LOSES_PATIENCE'] = no_req_df.apply(lambda row: np.full(len(inData.platforms.index.values), np.nan), axis=1)
     pax_exp = pd.concat([pax_exp,no_req_df]).sort_index()
-    sim.last_res.pax_exp = pax_exp.copy() # store in MaaSSim simulator object
+    sim.last_res.pax_exp = pax_exp.copy() # store in (MaaS)Sim simulator object
 
     # 2) Load driver KPIs
     # find all columns included in platform output files (i.e. including highest occupancy)

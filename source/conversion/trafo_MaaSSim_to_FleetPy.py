@@ -10,17 +10,6 @@ def _create_seconds_of_day(dt_str):
     return 3600 * hour + 60 * minute + second
 
 
-def convert_platform_encoding(platforms_str):
-    if platforms_str == ";":
-        return None
-    elif platforms_str == "0;":
-        return "0"
-    elif platforms_str == "1;":
-        return "1"
-    else:
-        return "0;1"
-
-
 def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name,
                                      demand_name, d2d_params, zone_system_name=None, exp_zone_demand=None):
     """This function transforms the output files of the day-to-day model for the within-day (FleetPy) model.
@@ -49,13 +38,12 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     pax_f = os.path.join(dtd_result_dir, "inData_passengers.csv")
     pax_df = pd.read_csv(pax_f, index_col=0)
     c_df = pd.merge(rq_df, pax_df, left_on="pax_id", right_index=True)
-    f_df = c_df.loc[c_df["platforms"] != ';'].reset_index()
+    f_df = c_df.loc[~(c_df["platforms"].isna())].reset_index()
     f_df['start'] = f_df['origin'].apply(lambda x: source_to_node_id[x])
     f_df['end'] = f_df['destination'].apply(lambda x: source_to_node_id[x])
     fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]]
     fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
     fpy_rq_df.rename({"rq_id": "request_id", "VoT": "value_of_time", "platforms" : "user_list_operators"}, axis=1, inplace=True) # rename
-    fpy_rq_df["user_list_operators"] = fpy_rq_df["user_list_operators"].apply(lambda x: convert_platform_encoding(x))
     fpy_rq_df.sort_values("rq_time", inplace=True)
 
     fpy_rq_f = os.path.join(fleetpy_dir, "data", "demand", demand_name)
@@ -67,7 +55,6 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     fpy_rq_f = os.path.join(fpy_rq_f, nw_name)
     if not os.path.isdir(fpy_rq_f):
         os.mkdir(fpy_rq_f)
-    # fpy_rq_f = os.path.join(fleetpy_dir, "data", "demand", fleetpy_study_name, nw_name, f"{new_wd_scenario_name}.csv")
     fpy_rq_f = os.path.join(fleetpy_dir, "data", "demand", demand_name, "matched", nw_name, f"{new_wd_scenario_name}.csv")
     try:
         fpy_rq_df.to_csv(fpy_rq_f, index=False)
@@ -99,7 +86,6 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     driver_f = os.path.join(dtd_result_dir, "inData_vehicles.csv")
     driver_df = pd.read_csv(driver_f, index_col=0)
     driver_df.index.name = "driver_id"
-    print(driver_df.head())
     fp_driver_df_list = []
     for driver_id, driver_row in driver_df.iterrows():
         platforms = driver_row["platform"]
@@ -122,8 +108,6 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     fp_driver_f_name = f"driver_{new_wd_scenario_name}.csv"
     fp_driver_f = os.path.join(fp_driver_f, fp_driver_f_name)  
     fp_driver_df.to_csv(fp_driver_f, index=False)
-    print(fp_driver_df.head())
-    #driver_id,veh_type,possible_operators
 
     # 3) create scenario input file
     start_time = _create_seconds_of_day(d2d_params.t0)

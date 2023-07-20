@@ -42,8 +42,3 @@ def set_multihoming_drivers(driver_df, params):
     driver_df['multihoming'] = np.random.random(params.nV) < mh_share
 
     return driver_df
-
-
-def zero_to_nan(perc_income):
-    perc_income[perc_income == 0] = np.nan
-    return perc_income
