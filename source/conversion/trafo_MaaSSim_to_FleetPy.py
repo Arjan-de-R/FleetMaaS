@@ -52,11 +52,14 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     pax_df = pd.read_csv(pax_f, index_col=0)
     c_df = pd.merge(rq_df, pax_df, left_on="pax_id", right_index=True)
     f_df = c_df.loc[~(c_df["platforms"].isna())].reset_index()
-    f_df['start'] = f_df['origin'].apply(lambda x: source_to_node_id[x])
-    f_df['end'] = f_df['destination'].apply(lambda x: source_to_node_id[x])
-    fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]]
-    fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
-    fpy_rq_df["platforms"] = fpy_rq_df["platforms"].apply(platform_data_conversion)
+    if not f_df.empty: # at least one traveller opts for ride-hailing
+        f_df['start'] = f_df['origin'].apply(lambda x: source_to_node_id[x])
+        f_df['end'] = f_df['destination'].apply(lambda x: source_to_node_id[x])
+        fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]]
+        fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
+        fpy_rq_df["platforms"] = fpy_rq_df["platforms"].apply(platform_data_conversion)
+    else:
+        fpy_rq_df = pd.DataFrame(columns=["rq_id", "rq_time", "treq", "start", "end", "platforms", "VoT"])
     fpy_rq_df.rename({"rq_id": "request_id", "VoT": "value_of_time", "platforms" : "user_list_operators"}, axis=1, inplace=True) # rename
     fpy_rq_df.sort_values("rq_time", inplace=True)
 
@@ -136,8 +139,6 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     op_max_detour_time_factor = ";".join([str(x) for x in platform_df["max_rel_detour"].values])
     op_max_wait_time = ";".join([str(x) for x in platform_df["max_wait_time"].values])
     op_vr_control_func_dict = "|".join([str(x) for x in platform_df["match_obj"].values])
-
-    print(platform_df.head())
     
     sc_df_list = [{
         G_NETWORK_NAME: nw_name,
@@ -166,7 +167,6 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     
     sc_df = pd.DataFrame(sc_df_list)
     sc_df.to_csv(os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{new_wd_scenario_name}.csv"), index=False)
-    print(sc_df)
 
 
 # testing
