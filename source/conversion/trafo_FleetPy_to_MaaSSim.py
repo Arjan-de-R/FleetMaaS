@@ -59,9 +59,9 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
             # check which columns are missing
             missing_cols = list(set(all_col_names).difference(plf_kpis.columns.values.tolist()))
             plf_kpis[missing_cols] = 0
-            plf_kpis = plf_kpis.set_index('driver_id')
         else:
             plf_kpis = pd.DataFrame(columns=all_col_names)
+        plf_kpis = plf_kpis.set_index('driver_id')
         aggr_kpis = pd.concat([aggr_kpis, plf_kpis])
     
     if not aggr_kpis.empty: # there is at least a single driver
