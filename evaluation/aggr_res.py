@@ -10,19 +10,23 @@ import ast
 from utils import create_d2d_df, create_attr_df, determine_req_repl_indicator
 import math
 import itertools
+import pickle
 
 ### ---------------------- INPUT -----------------------###
 
 # Which scenarios?
-var_dict = {'cmpt_type': ['sp'], 'dem_mh_share': [0.6], 'sup_mh_share': [0.5]}
+var_dict = {'cmpt_type': ['sp'], 'dem_mh_share': [0.0, 0.5], 'sup_mh_share': [0.5]}
 
-# Required parameter values for statistical significance of equilibria
+# Required parameter values for statistical significance of equilibria TODO: take moving average instead
 conv_signif = 0.05
 conv_max_error = 0.02
-conv_days = 3 # TODO: take from params file
+conv_days = 5 # TODO: take from params file
 
 # Results path
 res_path = os.path.join(path, 'results')
+
+# Experiment name
+exp_name = 'homing_cmpt' # determines where aggregated results are stored
 
 ### --------------------- SCRIPT --------------------- ###
 
@@ -74,8 +78,14 @@ for scn_name in scenario_names:
                 plf_attr = create_attr_df(scn_dict, repl_id, repl_folder_path, item, index_name='id', attr_df=plf_attr)
             if item.endswith('4_out-filter-pax.csv'):
                 all_pax_attr = create_attr_df(scn_dict, repl_id, repl_folder_path, item, index_name='pax_id', attr_df=all_pax_attr)
-    d2d_pax = d2d_pax.sort_index(level=['repl','day','pax']) # Sort multi-index df based on day id
-    d2d_veh = d2d_veh.sort_index(level=['repl','day','veh']) # Sort multi-index df based on day id
+    
+    # Sort multi-index df's
+    d2d_pax = d2d_pax.sort_index(level=(list(keys)) + ['repl','day','pax'])
+    d2d_veh = d2d_veh.sort_index(level=(list(keys)) + ['repl','day','veh'])
+    pax_attr = pax_attr.sort_index(level=(list(keys)) + ['repl','pax_id'])
+    driver_attr = driver_attr.sort_index(level=(list(keys)) + ['repl','veh_id'])
+    plf_attr = plf_attr.sort_index(level=(list(keys)) + ['repl','id'])
+    all_pax_attr = all_pax_attr.sort_index(level=(list(keys)) + ['repl','pax_id'])
 
     # Now select rows corresponding to equilibrium
     eql_pax = d2d_pax.groupby(['repl', 'pax']).tail(conv_days)
@@ -98,9 +108,9 @@ for scn_name in scenario_names:
             req_repl_indicator[col] = determine_req_repl_indicator(current_n_repl, avg_repl_perc_indicator, std_repl_perc_indicator, conv_signif, conv_max_error)
     req_repl_indicator['current_n_repl'] = current_n_repl
     req_repl = req_repl.append({**req_repl_indicator, **scn_dict}, ignore_index=True)
-    req_repl = req_repl.set_index(list(scn_dict.keys()))
 
 # Check for which scenarios insufficient replications have been run
+req_repl = req_repl.set_index(list(keys))
 req_repl['req_n_repl'] = req_repl.drop(columns=['current_n_repl']).max(axis=1)
 req_repl['sufficient_req'] = req_repl.current_n_repl >= req_repl.req_n_repl
 if req_repl.sufficient_req.all(): 
@@ -109,5 +119,24 @@ else:
     for index, row in req_repl.loc[~req_repl.sufficient_req].iterrows():
         print('Insufficient replications for scenario {}: {} out of {} required'.format(dict(zip(keys, index)), int(row.current_n_repl), math.ceil(row.req_n_repl)))
 
-# print('Replications needed based on individual indicators: {}'.format(req_repl_indicator))
-# print('Total number of replications needed to satisfy all indicators: {}, due to indicator {}'.format(math.ceil(max(req_repl_indicator.values())), max(req_repl_indicator, key=req_repl_indicator.get)))
+# Save the aggregated dataframe in parquet format
+aggr_res_path = os.path.join('evaluation', 'studies', exp_name, 'aggr_data')
+if not os.path.exists(os.path.join('evaluation', 'studies')):
+    os.mkdir(os.path.join('evaluation', 'studies'))
+if not os.path.exists(os.path.join('evaluation', 'studies', exp_name)):
+    os.mkdir(os.path.join('evaluation', 'studies', exp_name))
+if not os.path.exists(aggr_res_path):
+    os.mkdir(aggr_res_path)
+with open(os.path.join(aggr_res_path, 'd2d_pax.pkl'), 'wb') as f:
+    pickle.dump(d2d_pax, f)
+with open(os.path.join(aggr_res_path, 'd2d_veh.pkl'), 'wb') as f:
+    pickle.dump(d2d_veh, f)
+with open(os.path.join(aggr_res_path, 'pax_attr.pkl'), 'wb') as f:
+    pickle.dump(pax_attr, f)
+with open(os.path.join(aggr_res_path, 'driver_attr.pkl'), 'wb') as f:
+    pickle.dump(driver_attr, f)
+with open(os.path.join(aggr_res_path, 'plf_attr.pkl'), 'wb') as f:
+    pickle.dump(plf_attr, f)
+with open(os.path.join(aggr_res_path, 'all_pax_attr.pkl'), 'wb') as f:
+    pickle.dump(all_pax_attr, f)
+# TODO: how to save params

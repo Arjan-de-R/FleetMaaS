@@ -68,6 +68,12 @@ def single_pararun(one_slice, *args):
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     filename=os.path.join('results','{}'.format(scn_name), '00_simulation.log'),  # File to save logs
                     filemode='a')       # Append mode for the log file
+    logger_d2d = logging.getLogger("logger_d2d")
+    logger_d2d.setLevel(logging.INFO)
+
+    handler = logging.FileHandler(os.path.join('results','{}'.format(scn_name), '00_simulation.log'))
+    handler.setLevel(logging.INFO)
+    logger_d2d.addHandler(handler)
 
     sim = simulate(inData=_inData, params=_params, logger_level=logging.INFO, scn_name = scn_name)
 
@@ -217,9 +223,12 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     scn_name = kwargs.get('scn_name')
     if not os.path.exists(os.path.join(path,'results')):
         os.mkdir(os.path.join(path,'results'))
-    if not os.path.exists(os.path.join(path,'results',scn_name)):
-        os.mkdir(os.path.join(path,'results',scn_name))
     result_path = os.path.join(path, 'results', scn_name)
+    if not os.path.exists(result_path):
+        os.mkdir(result_path)
+    elif os.path.exists(os.path.join(result_path,"5_perc-utilities.csv")):
+        os.remove(os.path.join(result_path,"5_perc-utilities.csv"))
+    
     params.t0 = params.t0.to_pydatetime().strftime('%Y-%m-%d %H:%M:%S')
     with open(os.path.join(result_path, '0_params.json'), 'w') as json_file:
         json.dump(params, json_file)
@@ -237,9 +246,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     del all_pax, all_req, all_pax_df
 
     # Initialise convergence
-    last_avg_perc_util_plf_travs = [-999] * len(inData.platforms.index)
-    last_avg_perc_util_plf_drivers = [-999] * len(inData.platforms.index)
-    steady_days = 0
+    d2d_perc_util = pd.DataFrame()
 
     # Day-to-day simulator
     for day in range(params.get('nD', 1)):  # run iterations
@@ -324,6 +331,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         drivers_summary['init_perc_util'] = drivers_summary.apply(lambda row: params.evol.drivers.particip.beta * row.init_perc_inc, axis=1)
         drivers_summary['new_perc_util'] = inData.vehicles.apply(lambda row: params.evol.drivers.particip.beta * row.expected_income, axis=1)
 
+        # Store KPIs of day
+        dem_df, sup_df = d2d_summary_day(drivers_summary, travs_summary)
+        dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))
+        sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
+
         # Determine convergence
         avg_perc_util_plf_travs = []
         avg_perc_util_plf_drivers = []
@@ -332,32 +344,31 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             avg_perc_util_plf_travs = avg_perc_util_plf_travs + [avg_util_trav]
             avg_util_driver = drivers_summary.apply(lambda row: row.new_perc_util[plf], axis=1).mean()
             avg_perc_util_plf_drivers = avg_perc_util_plf_drivers + [avg_util_driver]
-        rel_change_util_travs = np.array(avg_perc_util_plf_travs) / np.array(last_avg_perc_util_plf_travs)
-        rel_change_util_drivers = np.array(avg_perc_util_plf_drivers) / np.array(last_avg_perc_util_plf_drivers)
-        if np.all(rel_change_util_travs < params.convergence.factor) and np.all(rel_change_util_drivers < params.convergence.factor): # steady for both sides on all platforms
-            steady_days +=1
+        perc_util_day = pd.DataFrame([{'util_travs': avg_perc_util_plf_travs, 'util_drivers': avg_perc_util_plf_drivers}])
+        for col in perc_util_day:
+            new_col_list = ['{}_{}'.format(col, plf_id) for plf_id in range(len(params.platforms.service_types))]
+            perc_util_day[new_col_list] = np.stack(perc_util_day[col].values)
+            perc_util_day = perc_util_day.drop(columns=[col])
+        # Create new dataframe containing perceived utilities of all days
+        d2d_perc_util = pd.concat([d2d_perc_util, perc_util_day])
+        # Create a copy of the csv by adding the last row to the already existing csv
+        if day == 0: # include the headers on the first day
+            perc_util_day.to_csv(os.path.join(result_path,'5_perc-utilities.csv'), mode='a', index=False, header=True)
         else:
-            steady_days = 0
+            perc_util_day.to_csv(os.path.join(result_path,'5_perc-utilities.csv'), mode='a', index=False, header=False)
         
-        # Log state of the market
-        log_change_util_travs = ["{:.2%}".format(value) for value in rel_change_util_travs.tolist()]
-        log_change_util_drivers = ["{:.2%}".format(value) for value in rel_change_util_drivers.tolist()]
-        logging.info('Scenario {} - Day {} ended.'.format(scn_name, day))
-        logging.info('Scenario {} - Rel. change in avg. perc. platform utility: travellers = {}, drivers = {}.'.format(scn_name,log_change_util_travs,log_change_util_drivers))
-        logging.info('Scenario {} - Number of steady days is now {}.'.format(scn_name,steady_days))
-        last_avg_perc_util_plf_travs = avg_perc_util_plf_travs
-        last_avg_perc_util_plf_drivers = avg_perc_util_plf_drivers
-
-        # Store KPIs of day
-        dem_df, sup_df = d2d_summary_day(drivers_summary, travs_summary)
-        dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))
-        sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
         del drivers_summary, travs_summary, dem_df, sup_df
 
-        # Stop criterion
-        if steady_days >= params.convergence.req_steady_days:
-            break
-
+        if d2d_perc_util.shape[0] >= (params.convergence.moving_avg + params.convergence.req_steady_days + 1): # first day that convergence is possible
+            rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).pct_change().tail(params.convergence.req_steady_days)
+            conv_per_indicator = (rel_diff_ma_df.abs() < params.convergence.factor).all()
+            if conv_per_indicator.all():
+                print('Scenario {} - All indicators have converged at end of day {}, day-to-day simulation is terminated.'.format(scn_name, day))
+                break
+            else:
+                print('Scenario {} - Not all indicators have converged at end of day {}, next day is initialised.'.format(scn_name, day))
+        else:
+            print('Scenario {} - Initialisation period, simulation can not yet converge at end of day {}, next day is initialised.'.format(scn_name, day))
 
     return sim
 
