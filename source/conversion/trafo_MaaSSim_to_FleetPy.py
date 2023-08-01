@@ -166,6 +166,10 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         })
     
     sc_df = pd.DataFrame(sc_df_list)
+    if not os.path.exists(os.path.join(fleetpy_dir, "studies", fleetpy_study_name)):
+        os.mkdir(os.path.join(fleetpy_dir, "studies", fleetpy_study_name))
+    if not os.path.exists(os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios")):
+        os.mkdir(os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios"))
     sc_df.to_csv(os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{new_wd_scenario_name}.csv"), index=False)
 
 
