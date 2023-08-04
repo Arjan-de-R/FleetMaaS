@@ -15,7 +15,7 @@ import pickle
 ### ---------------------- INPUT -----------------------###
 
 # Which scenarios?
-var_dict = {'cmpt_type': ['sp'], 'dem_mh_share': [0.0, 0.5], 'sup_mh_share': [0.5]}
+var_dict = {'cmpt_type': ['sp'], 'dem_mh_share': [0.5], 'sup_mh_share': [0.5]}
 
 # Required parameter values for statistical significance of equilibria TODO: take moving average instead
 conv_signif = 0.05
