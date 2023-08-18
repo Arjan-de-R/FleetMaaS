@@ -31,13 +31,17 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
         pax_exp['fare'] = req_kpis.fare / 100
         pax_exp['platform'] = req_kpis.operator_id
         pax_exp['LOSES_PATIENCE'] = req_kpis.apply(lambda row: ~offer_received(row), axis=1)
+        for col in req_kpis.columns:
+            if col.startswith('time occ'):
+                pax_exp[col.replace(" ","_")] = req_kpis[col]
     else: 
         pax_exp = pd.DataFrame()
     # Now we add travellers that did not make a request
     all_travs = inData.passengers.index.values
     req_travs = pax_exp.index.values
     noreq_travs = list(set(all_travs) - set(req_travs))
-    no_req_df = pd.DataFrame(np.nan, index=noreq_travs, columns=['TRAVEL','WAIT','OPERATIONS','detour','fare','platform','LOSES_PATIENCE'])
+    time_occ_indicators = [s for s in pax_exp.columns if s.startswith("time_occ")]
+    no_req_df = pd.DataFrame(np.nan, index=noreq_travs, columns=(['TRAVEL','WAIT','OPERATIONS','detour','fare','platform','LOSES_PATIENCE'] + time_occ_indicators))
     no_req_df['LOSES_PATIENCE'] = no_req_df.apply(lambda row: np.full(len(inData.platforms.index.values), None), axis=1)
     pax_exp = pd.concat([pax_exp,no_req_df]).sort_index()
     sim.last_res.pax_exp = pax_exp.copy() # store in (MaaS)Sim simulator object
@@ -61,13 +65,24 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
             plf_kpis[missing_cols] = 0
         else:
             plf_kpis = pd.DataFrame(columns=all_col_names)
-        plf_kpis = plf_kpis.set_index('driver_id')
+        if 'driver_id' in plf_kpis.columns:
+            plf_kpis = plf_kpis.set_index('driver_id')
+        if plf == len(inData.plaforms.index): # the repositioning dataframe, not an actual platform
+            plf_kpis['pickup_dist'] = 0
+            plf_kpis['repos_dist'] = plf_kpis['km occ 0']
+        else: # corresponding to platform
+            plf_kpis['pickup_dist'] = plf_kpis['km occ 0']
+            plf_kpis['repos_dist'] = 0
+            
         aggr_kpis = pd.concat([aggr_kpis, plf_kpis])
     
     if not aggr_kpis.empty: # there is at least a single driver
         aggr_kpis = aggr_kpis.groupby('driver_id').sum()
         veh_exp = pd.DataFrame(index = aggr_kpis.index)
         veh_exp['NET_INCOME'] = (aggr_kpis.revenue - aggr_kpis['total variable costs']) / 100
+        for col in aggr_kpis.columns:
+            if col in ['pickup_dist', 'repos_dist'] or col.startswith("km occ"):
+                veh_exp[col] = aggr_kpis[col]
     else:
         veh_exp = aggr_kpis.copy()
 
@@ -75,10 +90,15 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     all_drivers = inData.vehicles.index.values
     ptcp_drivers = veh_exp.index.values
     noptcp_drivers = list(set(all_drivers) - set(ptcp_drivers))
-    kpis_no_ptcp = {'NET_INCOME': np.nan}
+    kpis_no_ptcp, dtype_no_ptcp = dict(), dict()
+    for col in veh_exp:
+        kpis_no_ptcp[col] = np.nan
+        dtype_no_ptcp[col] = "float64"
+    # kpis_no_ptcp = {'NET_INCOME': np.nan, 'pickup_dist': np.nan, 'repos_dist': np.nan}
     no_ptcp_df = pd.DataFrame.from_dict(kpis_no_ptcp, orient='index').transpose()
     no_ptcp_df = pd.DataFrame(np.repeat(no_ptcp_df.to_numpy(), len(noptcp_drivers), axis=0), columns=no_ptcp_df.columns) # repeat same row for all drivers that did not work
-    no_ptcp_df = no_ptcp_df.astype(dtype= {"NET_INCOME":"float64"})
+    # no_ptcp_df = no_ptcp_df.astype(dtype= {"NET_INCOME":"float64", "pickup_dist":"float64", "repos_dist":"float64"})
+    no_ptcp_df =  no_ptcp_df.astype(dtype=dtype_no_ptcp)
     no_ptcp_df['driver_id'] = noptcp_drivers
     no_ptcp_df = no_ptcp_df.set_index('driver_id')
     veh_exp = pd.concat([veh_exp,no_ptcp_df]).sort_index()
