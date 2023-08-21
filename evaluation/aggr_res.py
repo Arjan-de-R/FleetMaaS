@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import json
 import matplotlib.pyplot as plt
-from utils import create_d2d_df, create_attr_df, determine_req_repl_indicator, contains_item_from_list
+from utils import create_d2d_df_list, create_attr_df_list, determine_req_repl_indicator, contains_item_from_list
 import itertools
 import pickle
 
@@ -67,7 +67,7 @@ for scn_name in scenario_names:
         os.mkdir(aggr_scn_path)
 
     # Initialise files
-    d2d_pax, d2d_veh, pax_attr, driver_attr, plf_attr, all_pax_attr, req_repl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    d2d_pax_list, d2d_veh_list, pax_attr_list, driver_attr_list, plf_attr_list, all_pax_attr_list, req_repl = [], [], [], [], [], [], pd.DataFrame()
 
     # Loop over replications (adding all replications of the scenario to a single dataframe)
     for repl_folder in folder_names:
@@ -77,20 +77,25 @@ for scn_name in scenario_names:
             if item.startswith('day'):
                 day_id = int(item.split("_")[1])
                 if item.endswith('travs.csv'):
-                    d2d_pax = create_d2d_df(scn_dict, repl_id, day_id, repl_folder_path, item, agent_type='pax', d2d_df=d2d_pax)
+                    d2d_pax_list = create_d2d_df_list(repl_id, day_id, repl_folder_path, item, agent_type='pax', d2d_df_list=d2d_pax_list)
                 else:
-                    d2d_veh = create_d2d_df(scn_dict, repl_id, day_id, repl_folder_path, item, agent_type='veh', d2d_df=d2d_veh)
+                    d2d_veh_list = create_d2d_df_list(repl_id, day_id, repl_folder_path, item, agent_type='veh', d2d_df_list=d2d_veh_list)
             if item.endswith('1_pax-properties.csv'):
-                pax_attr = create_attr_df(scn_dict, repl_id, repl_folder_path, item, index_name='pax_id', attr_df=pax_attr)
-                pax_attr = pax_attr.drop(columns=['Unnamed: 0'])
-                pax_attr.rename_axis(index={'pax_id': 'pax'}, inplace=True)
+                pax_attr_list = create_attr_df_list(repl_id, repl_folder_path, item, index_name='pax_id', attr_df_list=pax_attr_list)
             if item.endswith('2_driver-properties.csv'):
-                driver_attr = create_attr_df(scn_dict, repl_id, repl_folder_path, item, index_name='veh_id', attr_df=driver_attr)
-                driver_attr.rename_axis(index={'veh_id': 'veh'}, inplace=True)
+                driver_attr_list = create_attr_df_list(repl_id, repl_folder_path, item, index_name='veh_id', attr_df_list=driver_attr_list)
             if item.endswith('3_platform-properties.csv'):
-                plf_attr = create_attr_df(scn_dict, repl_id, repl_folder_path, item, index_name='id', attr_df=plf_attr)
+                plf_attr_list = create_attr_df_list(repl_id, repl_folder_path, item, index_name='id', attr_df_list=plf_attr_list)
             if item.endswith('4_out-filter-pax.csv'):
-                all_pax_attr = create_attr_df(scn_dict, repl_id, repl_folder_path, item, index_name='pax_id', attr_df=all_pax_attr)
+                all_pax_attr_list = create_attr_df_list(repl_id, repl_folder_path, item, index_name='pax_id', attr_df_list=all_pax_attr_list)
+
+    # Concat the list of dataframes into a single dataframe
+    d2d_pax = pd.concat(d2d_pax_list)
+    d2d_veh = pd.concat(d2d_veh_list)
+    pax_attr = pd.concat(pax_attr_list).drop(columns=['Unnamed: 0']).rename_axis(index={'pax_id': 'pax'})
+    driver_attr = pd.concat(driver_attr_list).rename_axis(index={'veh_id': 'veh'})
+    plf_attr = pd.concat(plf_attr_list)
+    all_pax_attr = pd.concat(all_pax_attr_list)
 
     # Sort multi-index df's
     d2d_pax = d2d_pax.sort_index(level=['repl','day','pax'])
