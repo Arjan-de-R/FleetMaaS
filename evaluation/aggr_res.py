@@ -51,7 +51,7 @@ for scn_name in scenario_names:
 
     # List all files and find those corresponding to (different replications of) the specific scenario
     all_items = os.listdir(res_path)
-    folder_names = [item for item in all_items if os.path.isdir(os.path.join(res_path, item)) and item.startswith(scn_name)] # Filter only the directories
+    folder_names = [item for item in all_items if os.path.isdir(os.path.join(res_path, item)) and item.startswith(scn_name + '-')] # Filter only the directories
 
     # Open replication-independent (but scenario-specific) files - i.e. agent properties TODO: saving params to be used in analysis
     f = open(os.path.join(res_path, folder_names[0], '0_params.json'))
@@ -89,6 +89,7 @@ for scn_name in scenario_names:
             if item.endswith('4_out-filter-pax.csv'):
                 all_pax_attr_list = create_attr_df_list(repl_id, repl_folder_path, item, index_name='pax_id', attr_df_list=all_pax_attr_list)
 
+    print('All dataframes have been loaded')
     # Concat the list of dataframes into a single dataframe
     d2d_pax = pd.concat(d2d_pax_list)
     d2d_veh = pd.concat(d2d_veh_list)
