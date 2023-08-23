@@ -28,7 +28,7 @@ moving_average_days = 5 # Note: needs to be same as in simulation!
 res_path = os.path.join(path, 'results')
 
 # Experiment name
-exp_name = 'homing_cmpt' # determines where aggregated results are stored
+study_name = 'homing_cmpt' # determines where aggregated results are stored
 
 ### --------------------- SCRIPT --------------------- ###
 
@@ -58,11 +58,13 @@ for scn_name in scenario_names:
     params = json.load(f)
 
     # Check if scenario folder exists in 'evaluation'
-    aggr_scn_path = os.path.join('evaluation', 'studies', exp_name, scn_name)
+    aggr_scn_path = os.path.join('evaluation', 'studies', study_name, 'aggr_repl', scn_name)
     if not os.path.exists(os.path.join('evaluation', 'studies')):
         os.mkdir(os.path.join('evaluation', 'studies'))
-    if not os.path.exists(os.path.join('evaluation', 'studies', exp_name)):
-        os.mkdir(os.path.join('evaluation', 'studies', exp_name))
+    if not os.path.exists(os.path.join('evaluation', 'studies', study_name)):
+        os.mkdir(os.path.join('evaluation', 'studies', study_name))
+    if not os.path.exists(os.path.join('evaluation', 'studies', study_name, 'aggr_repl')):
+        os.mkdir(os.path.join('evaluation', 'studies', study_name, 'aggr_repl'))
     if not os.path.exists(aggr_scn_path):
         os.mkdir(aggr_scn_path)
 
