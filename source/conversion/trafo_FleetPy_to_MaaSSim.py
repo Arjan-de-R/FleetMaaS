@@ -49,7 +49,7 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     # 2) Load driver KPIs
     # find all columns included in platform output files (i.e. including highest occupancy)
     all_col_names = []
-    for plf in np.arange(len(inData.platforms.index)+1): # additional platform is for multi-homer repositioning (not associated with an actual platform)
+    for plf in np.arange(len(inData.platforms.index)+1): # additional platform is for repositioning (not associated with an actual platform)
         plf_kpis = pd.read_csv(os.path.join(result_dir,'standard_mod-{}_veh_eval.csv'.format(plf)), index_col = 0)
         col_names = plf_kpis.columns.values.tolist()
         all_col_names = all_col_names + list(set(col_names).difference(all_col_names))
@@ -57,7 +57,7 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     aggr_kpis = pd.DataFrame(columns=all_col_names)
     if 'driver_id' in aggr_kpis.columns: # at least a single driver
         aggr_kpis = aggr_kpis.set_index('driver_id')
-    for plf in np.arange(len(inData.platforms.index)+1): # additional platform is for multi-homer repositioning (not associated with an actual platform)
+    for plf in np.arange(len(inData.platforms.index)+1): # additional platform is for repositioning (not associated with an actual platform)
         plf_kpis = pd.read_csv(os.path.join(result_dir,'standard_mod-{}_veh_eval.csv'.format(plf)), index_col = 0)
         if not plf_kpis.empty: # at least one driver for this platform
             # check which columns are missing
@@ -67,7 +67,7 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
             plf_kpis = pd.DataFrame(columns=all_col_names)
         if 'driver_id' in plf_kpis.columns:
             plf_kpis = plf_kpis.set_index('driver_id')
-        if plf == len(inData.plaforms.index): # the repositioning dataframe, not an actual platform
+        if plf == len(inData.platforms.index): # the repositioning dataframe, not an actual platform
             plf_kpis['pickup_dist'] = 0
             plf_kpis['repos_dist'] = plf_kpis['km occ 0']
         else: # corresponding to platform
