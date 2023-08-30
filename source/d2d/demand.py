@@ -24,7 +24,7 @@ def mode_choice_preday(inData, params):
 
 def set_multihoming_travellers(trav_df, params):
     '''determines which travellers are open to multi-home'''
-    mh_share = params.evol.travellers.get('mh_share', 1)
+    mh_share = params.get('dem_mh_share', 1)
     trav_df['multihoming'] = np.random.random(trav_df.shape[0]) < mh_share
 
     return trav_df
@@ -42,7 +42,7 @@ def start_regist_travs(inData, params):
     
     prob_reg_start = params.evol.travellers.regist.get('prob_start', 1)
     trav_df['ttrav'] = inData.requests.ttrav.dt.total_seconds()
-    trav_df['registered'] = (np.random.rand(trav_df.shape[0]) < prob_reg_start) & trav_df.informed
+    trav_df['registered'] = (np.random.rand(trav_df.shape[0]) < prob_reg_start) * trav_df.informed
     trav_df['registered'] = trav_df.apply(lambda row: np.full(len(params.platforms.service_types), True) * row.registered, axis=1)
     trav_df['registered'] = trav_df.apply(lambda row: row.registered if row.multihoming else row.registered * array_with_pref_platform(params), axis=1)
     trav_df['expected_wait'] = trav_df.apply(lambda row: zero_to_nan(row.registered * np.ones(len(inData.platforms.index))) * params.evol.travellers.inform.start_wait, axis=1)
@@ -50,7 +50,7 @@ def start_regist_travs(inData, params):
     km_fare = inData.platforms.fare.values
     trav_df['expected_km_fare'] = trav_df.apply(lambda row: zero_to_nan(row.registered * km_fare.mean()) if row.multihoming else zero_to_nan(row.registered * km_fare), axis=1)
     trav_df = trav_df.drop(columns=['ttrav'])
-    trav_df['days_since_reg'] = trav_df.apply(lambda row: 0 if row.registered.sum() > 0 else np.nan, axis=1)
+    trav_df['days_since_reg'] = trav_df.apply(lambda row: params.evol.travellers.regist.min_days if row.registered.sum() > 0 else np.nan, axis=1)
 
     return trav_df
 

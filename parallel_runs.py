@@ -12,7 +12,7 @@ from MaaSSim.src_MaaSSim.d2d_sim import *
 params = get_config(os.path.join('MaaSSim','data','config','FM_AMS_cmpt.json'))
 
 ### SERVICE TYPES
-params.platforms.service_types = ['solo','pool'] # list with 'solo' or 'pooling' for each platform
+params.platforms.service_types = ['solo', 'pool'] # list with 'solo' or 'pooling' for each platform
 
 ### OPTIONAL: ADD / CHANGE MODEL PARAMETERS
 ## General settings
@@ -22,9 +22,9 @@ params.platforms.service_types = ['solo','pool'] # list with 'solo' or 'pooling'
 # params.paths.PT_trips = os.path.join(MAASSIM_DIR,'data','demand','{}'.format(params.city.split(",")[0],'albatross','req_PT.csv')
 # params.study_name = 'competition_trb24'
 # params.paths.fleetpy_config = 'constant_config.csv'
-params.nP = 5000 # travellers
-params.nV = 25 # drivers
-# params.nD = 3 # max. number of days
+params.nP = 20000 # travellers
+params.nV = 100 # drivers
+params.nD = 10 # max. number of days
 # params.simTime = 8 # hours
 ## Platform settings - platform 0
 # params.platforms.base_fare = 1.5 #euro
@@ -40,8 +40,8 @@ params.platforms.pool_discount = (1/3) # relative to solo fare
 # params.platforms.comm_rate_1 = 0.25 #rate
 # params.platforms.max_rel_detour_1 = 40 # if pooling is not allowed, this is set to 0 (with non-zero additional boarding time preventing pooling for identical trip requests)
 ## Multi-homing behaviour
-params.evol.travellers.mh_share = 0.5 # share of travellers open to multi-homing
-params.evol.drivers.mh_share = 0.5 # share of drivers open to multi-homing
+# params.evol.travellers.mh_share = 0.5 # share of travellers open to multi-homing
+# params.evol.drivers.mh_share = 0.5 # share of drivers open to multi-homing
 params.evol.drivers.particip.beta = 0.05
 params.evol.travellers.inform.std_fact = 1.0
 params.evol.drivers.inform.std_fact = 1.0
@@ -89,7 +89,8 @@ def generate_paths(params):
 def sample_space():
     # analysis of behavioural parameters
     space = DotMap()
-    space.comm_rate = [0.25]
+    space.dem_mh_share = [0.6]
+    space.sup_mh_share = [0.5]
     space.repl_id = [0]
     return space
 
@@ -99,16 +100,16 @@ def determine_n_threads(search_space):
     # Iterate over the items
     for key, value in search_space.items():
         n_thread = n_thread * len(value)
-    
     return n_thread
 
-search_space=sample_space()
-params.parallel.nThread = determine_n_threads(search_space)
+if __name__=="__main__":
+    search_space=sample_space()
+    params.parallel.nThread = determine_n_threads(search_space)
 
-# # OPTIONAL: If you want to save the parameter values to a config json
-# params.t0 = params.t0.to_pydatetime().strftime('%Y-%m-%d %H:%M:%S')
-# params.NAME = "FM_AMS_competition"
-# params.paths.params = os.path.join(MAASSIM_DIR,"data","config")
-# save_config(params)
+    # # # OPTIONAL: If you want to save the parameter values to a config json
+    # params.t0 = params.t0.to_pydatetime().strftime('%Y-%m-%d %H:%M:%S')
+    # params.NAME = "FM_AMS_cmpt"
+    # params.paths.params = os.path.join(MAASSIM_DIR,"data","config")
+    # save_config(params)
 
-simulate_parallel(params=params, search_space=sample_space())
+    simulate_parallel(params=params, search_space=sample_space())

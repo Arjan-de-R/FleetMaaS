@@ -68,8 +68,14 @@ def single_pararun(one_slice, *args):
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     filename=os.path.join('results','{}'.format(scn_name), '00_simulation.log'),  # File to save logs
                     filemode='a')       # Append mode for the log file
+    logger_d2d = logging.getLogger("logger_d2d")
+    logger_d2d.setLevel(logging.INFO)
 
-    sim = simulate(inData=_inData, params=_params, logger_level=logging.WARNING, scn_name = scn_name)
+    handler = logging.FileHandler(os.path.join('results','{}'.format(scn_name), '00_simulation.log'))
+    handler.setLevel(logging.INFO)
+    logger_d2d.addHandler(handler)
+
+    sim = simulate(inData=_inData, params=_params, logger_level=logging.INFO, scn_name = scn_name)
 
     print(scn_name, pd.Timestamp.now(), 'end')
     return 0
@@ -217,9 +223,12 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     scn_name = kwargs.get('scn_name')
     if not os.path.exists(os.path.join(path,'results')):
         os.mkdir(os.path.join(path,'results'))
-    if not os.path.exists(os.path.join(path,'results',scn_name)):
-        os.mkdir(os.path.join(path,'results',scn_name))
     result_path = os.path.join(path, 'results', scn_name)
+    if not os.path.exists(result_path):
+        os.mkdir(result_path)
+    elif os.path.exists(os.path.join(result_path,"5_perc-utilities.csv")):
+        os.remove(os.path.join(result_path,"5_perc-utilities.csv"))
+    
     params.t0 = params.t0.to_pydatetime().strftime('%Y-%m-%d %H:%M:%S')
     with open(os.path.join(result_path, '0_params.json'), 'w') as json_file:
         json.dump(params, json_file)
@@ -237,9 +246,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     del all_pax, all_req, all_pax_df
 
     # Initialise convergence
-    last_avg_perc_util_plf_travs = [-999] * len(inData.platforms.index)
-    last_avg_perc_util_plf_drivers = [-999] * len(inData.platforms.index)
-    steady_days = 0
+    d2d_perc_util = pd.DataFrame()
 
     # Day-to-day simulator
     for day in range(params.get('nD', 1)):  # run iterations
@@ -303,7 +310,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.vehicles.informed = wom_driver(inData, params=params)   # which job seekers are informed about ride-hailing
         
         # (De-)registration decisions
-        inData.vehicles = platform_regist(inData, drivers_summary, params=params)
+        inData.vehicles = platform_regist_driver(inData, drivers_summary, params=params)
         inData.vehicles.pos = fixed_supply.pos
 
         # Demand-side diffusion of platform information
@@ -311,44 +318,87 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.passengers.informed = res_inf_trav.informed
         inData = platform_regist_trav(inData, travs_summary, params=params)
 
+        # Determine perceived utility (init and new) - per platform
+        dem_df = inData.passengers[['VoT','ASC_rs','ASC_pool']]
+        dem_df['perc_wait'] = travs_summary.init_perc_wait
+        dem_df['perc_ivt'] = travs_summary.init_perc_ivt
+        dem_df['perc_fare'] = travs_summary.init_perc_km_fare
+        # travs_summary['init_perc_util'] = dem_df.apply(lambda row: np.array(util_plfs(inData, params, row)), axis=1)
+        dem_df['perc_wait'] = inData.passengers.expected_wait
+        dem_df['perc_ivt'] = inData.passengers.expected_ivt
+        dem_df['perc_fare'] = inData.passengers.expected_km_fare
+
+        # if params.platforms.service_types == ['solo', 'pool'] or params.platforms.service_types == ['pool', 'solo']:
+        #     dem_df['ASC_rs'] = dem_df.apply(lambda row: (row.ASC_rs + row.ASC_pool) / 2 if row.multihoming else row.ASC_rs, axis=1) # we need to change ASCs for multihomers because they consider the market as one 
+        #     dem_df['ASC_pool'] = dem_df.apply(lambda row: (row.ASC_rs + row.ASC_pool) / 2 if row.multihoming else row.ASC_pool, axis=1)
+        travs_summary['new_perc_ptcp_util'] = dem_df.apply(lambda row: util_plfs(inData, params, row), axis=1)
+        travs_summary['relev_perc_util'] = travs_summary.apply(lambda row: np.nanmean(np.where(row.registered, row.registered, np.nan) * row.new_perc_ptcp_util), axis=1)
+        drivers_summary['relev_perc_util'] = inData.vehicles.apply(lambda row: params.evol.drivers.particip.beta * np.nanmean(np.where(row.registered, row.registered, np.nan) * row.expected_income), axis=1) # of registered only
+        # drivers_summary['rel_expected_income']
+        # drivers_summary['init_perc_util'] = drivers_summary.apply(lambda row: params.evol.drivers.particip.beta * row.init_perc_inc, axis=1)
+        # drivers_summary['res_wage'] = inData.vehicles['res_wage']
+        # drivers_summary['expected_income'] = inData.vehicles['expected_income']
+        # drivers_summary['perc_util_alt'] = drivers_summary.apply(lambda row: params.evol.drivers.particip.beta * row.res_wage, axis=1) # utility of not participating
+        # drivers_summary['new_perc_ptcp_util'] = drivers_summary.apply(lambda row: params.evol.drivers.particip.beta * row.expected_income, axis=1)
+        # drivers_summary['new_prob_ptcp_plf'] = drivers_summary.apply(lambda row: np.exp(row.new_perc_ptcp_util) / np.exp(row.new_perc_ptcp_util + row.perc_util_alt), axis=1) # probability to participate with platform when registered
+        # drivers_summary['reg_plf_util'] = drivers_summary.apply(lambda row: params.evol.drivers.regist.beta * (row.new_prob_ptcp_plf * (row.expected_income - row.res_wage) - params.evol.drivers.cost_comp), axis=1) # same for all platforms for multihomers
+        # drivers_summary['exp_summed_reg_util'] = drivers_summary.apply(lambda row: sum(np.exp(row.reg_plf_util)), axis=1)
+        # drivers_summary['rel_prob_reg_plf'] = drivers_summary.apply(lambda row: np.exp(row.reg_plf_util) / row.exp_summed_reg_util, axis=1) # probability to participate with platform when registered
+        # drivers_summary['perc_util_rh'] = drivers_summary.apply(lambda row: sum(row.rel_prob_reg_plf * row.new_perc_ptcp_util), axis=1)
+        # drivers_summary['perc_inc_rh'] = drivers_summary.apply(lambda row: sum(row.rel_prob_reg_plf * row.expected_income), axis=1)
+        # drivers_summary['perc_prob_ptcp_rh'] = np.exp(drivers_summary.perc_util_rh) / (np.exp(drivers_summary.perc_util_rh) + np.exp(drivers_summary.perc_util_alt)) # when registered
+        # drivers_summary['reg_util_rh'] = drivers_summary.apply(lambda row: params.evol.drivers.regist.beta * ((row.perc_prob_ptcp_rh * (row.perc_inc_rh - row.res_wage)) - params.evol.drivers.cost_comp), axis=1)
+        # drivers_summary['prob_reg_rh'] = drivers_summary.apply(lambda row: np.exp(row.reg_util_rh) / (np.exp(row.reg_util_rh) + 1), axis=1)
+        # drivers_summary['perc_util_total'] = drivers_summary.apply(lambda row: row.prob_reg_rh * row.perc_prob_ptcp_rh * row.perc_util_rh + (1-row.prob_reg_rh) * row.perc_util_alt, axis=1)
+        # Determine probability to participate with a platform (when registered), depending on utilities of platform and other modes
+        # Determine the relative registration probability, summing to 1 for all platforms
+
         # Store KPIs of day
         dem_df, sup_df = d2d_summary_day(drivers_summary, travs_summary)
         dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))
         sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
 
         # Determine convergence
-        df_pax = inData.passengers[['VoT', 'ASC_rs', 'ASC_pool']]
-        df_pax[['new_perc_wait', 'new_perc_ivt', 'new_perc_fare']] = travs_summary[['new_perc_wait','new_perc_ivt','new_perc_fare']]
-        df_pax['perc_util_plf'] = df_pax.apply(lambda row: util_plfs(inData, params, row), axis=1)
-        avg_perc_util_plf_travs = []
-        df_veh = drivers_summary[['new_perc_inc']]
-        df_veh['perc_util_plf'] = df_veh.apply(lambda row: params.evol.drivers.particip.beta * row.new_perc_inc, axis=1)
-        avg_perc_util_plf_drivers = []
-        for plf in inData.platforms.index:
-            avg_util_trav = df_pax.apply(lambda row: row.perc_util_plf[plf], axis=1).mean()
-            avg_perc_util_plf_travs = avg_perc_util_plf_travs + [avg_util_trav]
-            avg_util_driver = df_veh.apply(lambda row: row.perc_util_plf[plf], axis=1).mean()
-            avg_perc_util_plf_drivers = avg_perc_util_plf_drivers + [avg_util_driver]
-        rel_change_util_travs = np.array(avg_perc_util_plf_travs) / np.array(last_avg_perc_util_plf_travs)
-        rel_change_util_drivers = np.array(avg_perc_util_plf_drivers) / np.array(last_avg_perc_util_plf_drivers)
-        if np.all(rel_change_util_travs < params.convergence.factor) and np.all(rel_change_util_drivers < params.convergence.factor): # steady for both sides on all platforms
-            steady_days +=1
+        # avg_perc_util_plf_travs = []
+        # avg_perc_util_plf_drivers = []
+        # for plf in inData.platforms.index:
+        #     avg_util_trav = travs_summary.apply(lambda row: row.new_perc_ptcp_util[plf], axis=1).mean()
+        #     avg_perc_util_plf_travs = avg_perc_util_plf_travs + [avg_util_trav]
+        #     avg_util_driver = drivers_summary.apply(lambda row: row.new_perc_ptcp_util[plf], axis=1).mean()
+        #     avg_perc_util_plf_drivers = avg_perc_util_plf_drivers + [avg_util_driver]
+        # perc_util_day = pd.DataFrame([{'util_travs': avg_perc_util_plf_travs, 'util_drivers': avg_perc_util_plf_drivers}])
+        # for col in perc_util_day:
+        #     new_col_list = ['{}_{}'.format(col, plf_id) for plf_id in range(len(params.platforms.service_types))]
+        #     perc_util_day[new_col_list] = np.stack(perc_util_day[col].values)
+        #     perc_util_day = perc_util_day.drop(columns=[col])
+        # Create new dataframe containing perceived utilities of all days
+        perc_util_day = pd.DataFrame([{'util_travs': travs_summary.relev_perc_util.mean(), 'util_drivers': drivers_summary.relev_perc_util.mean()}])
+        d2d_perc_util = pd.concat([d2d_perc_util, perc_util_day])
+        # Create a copy of the csv by adding the last row to the already existing csv
+        if day == 0: # include the headers on the first day
+            perc_util_day.to_csv(os.path.join(result_path,'5_perc-utilities.csv'), mode='a', index=False, header=True)
         else:
-            steady_days = 0
+            perc_util_day.to_csv(os.path.join(result_path,'5_perc-utilities.csv'), mode='a', index=False, header=False)
         
-        # Log state of the market
-        log_change_util_travs = ["{:.2%}".format(value) for value in rel_change_util_travs.tolist()]
-        log_change_util_drivers = ["{:.2%}".format(value) for value in rel_change_util_drivers.tolist()]
-        logging.info('Scenario {} - Day {} ended.'.format(scn_name, day))
-        logging.info('Scenario {} - Rel. change in avg. perc. platform utility: travellers = {}, drivers = {}.'.format(scn_name,log_change_util_travs,log_change_util_drivers))
-        logging.info('Scenario {} - Number of steady days is now {}.'.format(scn_name,steady_days))
-        last_avg_perc_util_plf_travs = avg_perc_util_plf_travs
-        last_avg_perc_util_plf_drivers = avg_perc_util_plf_drivers
+        del drivers_summary, travs_summary, dem_df, sup_df
 
-        # Stop criterion
-        if steady_days >= params.convergence.req_steady_days:
-            break
-
+        if d2d_perc_util.shape[0] >= (params.convergence.moving_avg + params.convergence.req_steady_days + 1): # first day that convergence is possible
+            if params.convergence.get('abs_util_diff_dem', False) and params.convergence.get('abs_util_diff_sup', False):  # if absolute max. utility change is specified (possibly different on demand and supply side)
+                rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).diff().tail(params.convergence.req_steady_days)
+                rel_diff_ma_df['dem_conv'] = rel_diff_ma_df.util_travs.abs() < params.convergence.abs_util_diff_dem
+                rel_diff_ma_df['sup_conv'] = rel_diff_ma_df.util_drivers.abs() < params.convergence.abs_util_diff_sup
+                conv_per_indicator = rel_diff_ma_df[['dem_conv','sup_conv']].all()
+            else:
+                conv_factor = params.convergence.get('factor', 0.01)
+                rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).pct_change().tail(params.convergence.req_steady_days)
+                conv_per_indicator = (rel_diff_ma_df.abs() < conv_factor).all()
+            if conv_per_indicator.all():
+                print('Scenario {} - All indicators have converged at end of day {}, day-to-day simulation is terminated.'.format(scn_name, day))
+                break
+            else:
+                print('Scenario {} - Not all indicators have converged at end of day {}, next day is initialised.'.format(scn_name, day))
+        else:
+            print('Scenario {} - Initialisation period, simulation can not yet converge at end of day {}, next day is initialised.'.format(scn_name, day))
 
     return sim
 

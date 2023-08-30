@@ -30,7 +30,7 @@ def work_preday(vehicles, params):
                 expected_income = -999 # not further used (probability is set to 0 later)
         util_d = params.evol.drivers.particip.beta * expected_income
         prob_d = (np.exp(util_d) / (np.exp(util_d) + np.exp(util_nd))) * registered_anywhere
-        ptcp = prob_d < random.random()
+        ptcp = (random.random() < prob_d)
         vehicles.at[index, 'ptcp'] = ptcp * row.registered
 
     return vehicles
@@ -38,7 +38,7 @@ def work_preday(vehicles, params):
 
 def set_multihoming_drivers(driver_df, params):
     '''determines which job seekers are open to multi-home'''
-    mh_share = params.evol.drivers.get('mh_share', 1)
+    mh_share = params.get('sup_mh_share', 1)
     driver_df['multihoming'] = np.random.random(params.nV) < mh_share
 
     return driver_df
