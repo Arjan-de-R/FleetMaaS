@@ -160,14 +160,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers = prefs_travs(inData, params)
 
     all_req = inData.requests.copy()
-    # Determine whether to consider all generated requests in day-to-day simulation or only those that are relatively likely to consider ride-hailing
-    if params.evol.travellers.get('min_prob', 0) > 0:
-        all_pax = mode_filter(inData, params)
-        inData.passengers = all_pax[all_pax.mode_choice == "day-to-day"]
-        inData.requests = inData.requests[inData.requests.index.isin(inData.passengers.index)]
-    else:
-        all_pax = inData.passengers.copy()
-        all_pax['mode_choice'] = "day-to-day"
+    all_pax = mode_filter(inData, params)
+    inData.passengers = all_pax[all_pax.mode_choice == "day-to-day"]
+    inData.requests = inData.requests[inData.requests.index.isin(inData.passengers.index)]
     inData.passengers.reset_index(drop=True, inplace=True)
     inData.requests.reset_index(drop=True, inplace=True)
     inData.requests['pax_id'] = inData.requests.index
@@ -236,13 +231,13 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     df_req = inData.requests[['pax_id','origin','destination','treq','dist','ttrav']]
     if 'haver_dist' in inData.requests.columns:
         df_req['haver_dist'] = inData.requests['haver_dist']
-    df_pax = inData.passengers[['VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike','multihoming']]
+    df_pax = inData.passengers[['VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming']]
     pd.concat([df_req, df_pax], axis=1).to_csv(os.path.join(result_path,'1_pax-properties.csv'))
     inData.vehicles[['pos', 'res_wage', 'multihoming']].to_csv(os.path.join(result_path,'2_driver-properties.csv'))
     inData.platforms.to_csv(os.path.join(result_path, '3_platform-properties.csv'))
     all_pax_df = pd.concat([all_req, all_pax], axis=1)
-    all_pax_df[all_pax_df.mode_choice != 'day-to-day']
-    all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
+    all_pax_df = all_pax_df[all_pax_df.mode_choice != 'day-to-day']
+    all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_choice']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
     del all_pax, all_req, all_pax_df
 
     # Initialise convergence
