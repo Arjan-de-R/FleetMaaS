@@ -16,7 +16,7 @@ import pickle
 ### ---------------------- INPUT -----------------------###
 
 # Which scenarios?
-var_dict = {'cmpt_type': ['sp']}  # assumes full enumeration
+var_dict = {'cmpt_type': ['p']}  # assumes full enumeration
 
 # Required parameter values for statistical significance of equilibria
 conv_signif = 0.05
@@ -113,10 +113,12 @@ for scn_name in scenario_names:
     alt_mode_list.remove('rs')
     for mode in alt_mode_list:
         d2d_pax[mode] = (d2d_pax.chosen_mode == mode)
+        pax_attr['no_rs_{}'.format(mode)] = (pax_attr.mode_without_rs == mode)
+        all_pax_attr['other_trav_{}'.format(mode)] = (all_pax_attr.mode_choice == mode)
 
     # For each indicator in d2d_pax, determine whether it is a 'count' or 'mean' indicator (in the population of agents)
     mean_indicators, count_indicators = [], []
-    count_string_list = ["informed", "registered", "requests", "offer"] + alt_mode_list
+    count_string_list = ["informed", "registered", "requests", "offer"] + alt_mode_list 
     for col in d2d_pax.columns:
         if contains_item_from_list(col, count_string_list): # if the indicator is a count indicator
             count_indicators.append(col) # add (possibly platform-specific) indicator to count_indicators list
@@ -203,6 +205,19 @@ for scn_name in scenario_names:
     aggr_new_mean = d2d_pax_stats[mean_indicators].groupby(['repl', 'day']).mean().groupby(['day']).mean() # Aggregating by taking average across 'repl' and mean over 'pax' for each column
 
     aggr_dem_df = pd.concat([aggr_orig_sum, aggr_orig_mean, aggr_new_sum, aggr_new_mean], axis=1)
+
+    # Calculate effective passenger km per platform
+    d2d_pax_reset['eff_pax_dist_0'] = d2d_pax_reset.dist * d2d_pax_reset.accepts_offer_0
+    d2d_pax_reset['eff_pax_dist_1'] = d2d_pax_reset.dist * d2d_pax_reset.accepts_offer_1 if 'accepts_offer_1' in d2d_pax_reset.columns else np.nan
+    aggr_dem_df['eff_pax_dist_0'] = d2d_pax_reset['eff_pax_dist_0'].groupby(['repl', 'day']).sum().groupby(['day']).mean()
+    aggr_dem_df['eff_pax_dist_1'] = d2d_pax_reset['eff_pax_dist_1'].groupby(['repl', 'day']).sum().groupby(['day']).mean()
+
+    # Add modes without ridesourcing, including modes of filtered out pool of travellers
+    rel_columns = [item for item in pax_attr.columns if item.startswith("no_rs")]
+    other_mode_df = pax_attr[rel_columns].groupby(['repl']).sum().mean()
+    rel_columns = [item for item in all_pax_attr.columns if item.startswith("other_trav")]
+    other_mode_other_trav = all_pax_attr[rel_columns].groupby(['repl']).sum().mean()
+    mode_no_rs = pd.concat([other_mode_df, other_mode_other_trav]) # of those in and out of sample
 
     # Created population-level statistics (aggregate over agents) for each replication - on the supply side
     # First replace 'out' by inverse: 'ptcp'
@@ -471,6 +486,8 @@ for scn_name in scenario_names:
         pickle.dump(aggr_dem_df, f)
     with open(os.path.join(aggr_scn_path, 'aggr_sup.pkl'), 'wb') as f:
         pickle.dump(aggr_sup_df, f)
+    with open(os.path.join(aggr_scn_path, 'mode_no_rs.pkl'), 'wb') as f:
+        pickle.dump(mode_no_rs, f)
     # with open(os.path.join(aggr_res_path, 'pax_attr.pkl'), 'wb') as f:
     #     pickle.dump(pax_attr, f)
     # with open(os.path.join(aggr_res_path, 'driver_attr.pkl'), 'wb') as f:
