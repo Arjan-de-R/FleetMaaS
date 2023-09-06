@@ -338,8 +338,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Determine convergence
         # Create new dataframe containing perceived utilities of all days
         perc_util_day = pd.DataFrame([{'util_travs': travs_summary.relev_perc_util.mean(), 'util_drivers': drivers_summary.relev_perc_util.mean(), 
-                                       'ptcp_dem_0': dem_df.requests_0.sum(), 'ptcp_dem_1': dem_df.requests_1.sum(), 'ptcp_sup_0': (~sup_df.out_0).sum(),
-                                       'ptcp_sup_1': (~sup_df.out_0).sum()}])
+                                       'ptcp_dem_0': dem_df.requests_0.sum(), 'ptcp_sup_0': (~sup_df.out_0).sum()}])
+        if inData.platforms.shape[0] > 1: # more than one platform
+            perc_util_day['ptcp_dem_1'] = dem_df.requests_1.sum()
+            perc_util_day['ptcp_sup_1'] = (~sup_df.out_0).sum()
         d2d_perc_util = pd.concat([d2d_perc_util, perc_util_day])
         # Create a copy of the csv by adding the last row to the already existing csv
         if day == 0: # include the headers on the first day
@@ -356,10 +358,13 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             elif params.convergence.get('abs_ptcp_diff_dem', False) and params.convergence.get('abs_ptcp_diff_sup', False):
                 rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).diff().tail(params.convergence.req_steady_days)
                 rel_diff_ma_df['dem_0_conv'] = rel_diff_ma_df.ptcp_dem_0.abs() < params.convergence.abs_ptcp_diff_dem
-                rel_diff_ma_df['dem_1_conv'] = rel_diff_ma_df.ptcp_dem_1.abs() < params.convergence.abs_ptcp_diff_dem
                 rel_diff_ma_df['sup_0_conv'] = rel_diff_ma_df.ptcp_sup_0.abs() < params.convergence.abs_ptcp_diff_sup
-                rel_diff_ma_df['sup_1_conv'] = rel_diff_ma_df.ptcp_sup_1.abs() < params.convergence.abs_ptcp_diff_sup
-                conv_per_indicator = rel_diff_ma_df[['dem_0_conv','dem_1_conv','sup_0_conv','sup_1_conv']].all()
+                if inData.platforms.shape[0] > 1:
+                    rel_diff_ma_df['dem_1_conv'] = rel_diff_ma_df.ptcp_dem_1.abs() < params.convergence.abs_ptcp_diff_dem
+                    rel_diff_ma_df['sup_1_conv'] = rel_diff_ma_df.ptcp_sup_1.abs() < params.convergence.abs_ptcp_diff_sup
+                    conv_per_indicator = rel_diff_ma_df[['dem_0_conv','dem_1_conv','sup_0_conv','sup_1_conv']].all()
+                else:
+                    conv_per_indicator = rel_diff_ma_df[['dem_0_conv','sup_0_conv']].all()
             else:
                 conv_factor = params.convergence.get('factor', 0.01)
                 rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).pct_change().tail(params.convergence.req_steady_days)
