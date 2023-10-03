@@ -305,66 +305,46 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.vehicles.informed = wom_driver(inData, params=params)   # which job seekers are informed about ride-hailing
         
         # (De-)registration decisions
-        inData.vehicles = platform_regist_driver(inData, drivers_summary, params=params)
+        inData.vehicles, conv_sup_df = platform_regist_driver(inData, drivers_summary, params=params)
         inData.vehicles.pos = fixed_supply.pos
 
         # Demand-side diffusion of platform information
         res_inf_trav = wom_trav(inData, travs_summary, params=params)
         inData.passengers.informed = res_inf_trav.informed
-        inData = platform_regist_trav(inData, travs_summary, params=params)
-
-        # Determine perceived utility (init and new) - per platform
-        dem_df = inData.passengers[['VoT','ASC_rs','ASC_pool']]
-        dem_df['perc_wait'] = travs_summary.init_perc_wait
-        dem_df['perc_ivt'] = travs_summary.init_perc_ivt
-        dem_df['perc_fare'] = travs_summary.init_perc_km_fare
-        # travs_summary['init_perc_util'] = dem_df.apply(lambda row: np.array(util_plfs(inData, params, row)), axis=1)
-        dem_df['perc_wait'] = inData.passengers.expected_wait
-        dem_df['perc_ivt'] = inData.passengers.expected_ivt
-        dem_df['perc_fare'] = inData.passengers.expected_km_fare
-
-        # if params.platforms.service_types == ['solo', 'pool'] or params.platforms.service_types == ['pool', 'solo']:
-        #     dem_df['ASC_rs'] = dem_df.apply(lambda row: (row.ASC_rs + row.ASC_pool) / 2 if row.multihoming else row.ASC_rs, axis=1) # we need to change ASCs for multihomers because they consider the market as one 
-        #     dem_df['ASC_pool'] = dem_df.apply(lambda row: (row.ASC_rs + row.ASC_pool) / 2 if row.multihoming else row.ASC_pool, axis=1)
-        travs_summary['new_perc_ptcp_util'] = dem_df.apply(lambda row: util_plfs(inData, params, row), axis=1)
-        travs_summary['relev_perc_util'] = travs_summary.apply(lambda row: np.nanmean(np.where(row.registered, row.registered, np.nan) * row.new_perc_ptcp_util), axis=1)
-        drivers_summary['relev_perc_util'] = inData.vehicles.apply(lambda row: params.evol.drivers.particip.beta * np.nanmean(np.where(row.registered, row.registered, np.nan) * row.expected_income), axis=1) # of registered only
+        inData, conv_dem_df = platform_regist_trav(inData, travs_summary, params=params)
 
         # Store KPIs of day
         dem_df, sup_df = d2d_summary_day(drivers_summary, travs_summary)
         dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))
         sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
 
-        # Determine convergence
+        ### Determine convergence
         # Create new dataframe containing perceived utilities of all days
-        perc_util_day = pd.DataFrame([{'util_travs': travs_summary.relev_perc_util.mean(), 'util_drivers': drivers_summary.relev_perc_util.mean(), 
-                                       'ptcp_dem_0': dem_df.requests_0.sum(), 'ptcp_sup_0': (~sup_df.out_0).sum()}])
+        conv_indic = pd.DataFrame([{'expected_ptcp_dem_mh': conv_dem_df['expected_req_mh'], 'expected_ptcp_dem_sh_0': conv_dem_df['expected_req_sh_0'], 
+                                    'expected_ptcp_sup_mh': conv_sup_df['expected_ptcp_mh'], 'expected_ptcp_sup_sh_0': conv_sup_df['expected_ptcp_sh_0']}])
         if inData.platforms.shape[0] > 1: # more than one platform
-            perc_util_day['ptcp_dem_1'] = dem_df.requests_1.sum()
-            perc_util_day['ptcp_sup_1'] = (~sup_df.out_0).sum()
-        d2d_perc_util = pd.concat([d2d_perc_util, perc_util_day])
+            conv_indic['expected_ptcp_dem_sh_1'] = conv_dem_df['expected_req_sh_1']
+            conv_indic['expected_ptcp_sup_sh_1'] = conv_sup_df['expected_ptcp_sh_1']
+        d2d_perc_util = pd.concat([d2d_perc_util, conv_indic])
         # Create a copy of the csv by adding the last row to the already existing csv
         if day == 0: # include the headers on the first day
-            perc_util_day.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=True)
+            conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=True)
         else:
-            perc_util_day.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=False)
+            conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=False)
         
         if d2d_perc_util.shape[0] >= (params.convergence.moving_avg + params.convergence.req_steady_days + 1): # first day that convergence is possible
-            if params.convergence.get('abs_util_diff_dem', False) and params.convergence.get('abs_util_diff_sup', False):  # if absolute max. utility change is specified (possibly different on demand and supply side)
+            if params.convergence.get('abs_ptcp_diff_dem', False) and params.convergence.get('abs_ptcp_diff_sup', False):
                 rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).diff().tail(params.convergence.req_steady_days)
-                rel_diff_ma_df['dem_conv'] = rel_diff_ma_df.util_travs.abs() < params.convergence.abs_util_diff_dem
-                rel_diff_ma_df['sup_conv'] = rel_diff_ma_df.util_drivers.abs() < params.convergence.abs_util_diff_sup
-                conv_per_indicator = rel_diff_ma_df[['dem_conv','sup_conv']].all()
-            elif params.convergence.get('abs_ptcp_diff_dem', False) and params.convergence.get('abs_ptcp_diff_sup', False):
-                rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).diff().tail(params.convergence.req_steady_days)
-                rel_diff_ma_df['dem_0_conv'] = rel_diff_ma_df.ptcp_dem_0.abs() < params.convergence.abs_ptcp_diff_dem
-                rel_diff_ma_df['sup_0_conv'] = rel_diff_ma_df.ptcp_sup_0.abs() < params.convergence.abs_ptcp_diff_sup
+                rel_diff_ma_df['dem_mh_conv'] = rel_diff_ma_df.expected_ptcp_dem_mh.abs() < params.convergence.abs_ptcp_diff_dem * params.convergence.moving_avg
+                rel_diff_ma_df['dem_sh_0_conv'] = rel_diff_ma_df.expected_ptcp_dem_sh_0.abs() < params.convergence.abs_ptcp_diff_dem * params.convergence.moving_avg
+                rel_diff_ma_df['sup_mh_conv'] = rel_diff_ma_df.expected_ptcp_sup_mh.abs() < params.convergence.abs_ptcp_diff_sup * params.convergence.moving_avg
+                rel_diff_ma_df['sup_sh_0_conv'] = rel_diff_ma_df.expected_ptcp_sup_sh_0.abs() < params.convergence.abs_ptcp_diff_sup * params.convergence.moving_avg
                 if inData.platforms.shape[0] > 1:
-                    rel_diff_ma_df['dem_1_conv'] = rel_diff_ma_df.ptcp_dem_1.abs() < params.convergence.abs_ptcp_diff_dem
-                    rel_diff_ma_df['sup_1_conv'] = rel_diff_ma_df.ptcp_sup_1.abs() < params.convergence.abs_ptcp_diff_sup
-                    conv_per_indicator = rel_diff_ma_df[['dem_0_conv','dem_1_conv','sup_0_conv','sup_1_conv']].all()
+                    rel_diff_ma_df['dem_sh_1_conv'] = rel_diff_ma_df.expected_ptcp_dem_sh_1.abs() < params.convergence.abs_ptcp_diff_dem * params.convergence.moving_avg
+                    rel_diff_ma_df['sup_sh_1_conv'] = rel_diff_ma_df.expected_ptcp_sup_sh_1.abs() < params.convergence.abs_ptcp_diff_sup * params.convergence.moving_avg
+                    conv_per_indicator = rel_diff_ma_df[['dem_mh_conv','dem_sh_0_conv','dem_sh_1_conv','sup_mh_conv','sup_sh_0_conv','sup_sh_1_conv']].all()
                 else:
-                    conv_per_indicator = rel_diff_ma_df[['dem_0_conv','sup_0_conv']].all()
+                    conv_per_indicator = rel_diff_ma_df[['dem_mh_conv','dem_sh_0_conv','sup_mh_conv','sup_sh_0_conv']].all()
             else:
                 conv_factor = params.convergence.get('factor', 0.01)
                 rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).pct_change().tail(params.convergence.req_steady_days)
