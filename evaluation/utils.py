@@ -17,6 +17,9 @@ def create_attr_df_list(repl_id, repl_folder_path, item, index_name, attr_df_lis
     index_list = ['repl']
     if index_name == 'veh_id':
         df = df.rename(columns={"Unnamed: 0": "veh_id"})
+    elif index_name == 'day':
+        df.index.name = 'day'
+        df = df.reset_index()
     attr_df_list = attr_df_list + [df.set_index(index_list + [index_name])]
     return attr_df_list
 

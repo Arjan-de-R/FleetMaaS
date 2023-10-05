@@ -16,7 +16,7 @@ import pickle
 ### ---------------------- INPUT -----------------------###
 
 # Which scenarios?
-var_dict = {'cmpt_type': ['p']}  # assumes full enumeration
+var_dict = {'cmpt_type': ['sp']}  # assumes full enumeration
 
 # Required parameter values for statistical significance of equilibria
 conv_signif = 0.05
@@ -69,7 +69,7 @@ for scn_name in scenario_names:
         os.mkdir(aggr_scn_path)
 
     # Initialise files
-    d2d_pax_list, d2d_veh_list, pax_attr_list, driver_attr_list, plf_attr_list, all_pax_attr_list, req_repl = [], [], [], [], [], [], pd.DataFrame()
+    d2d_pax_list, d2d_veh_list, pax_attr_list, driver_attr_list, plf_attr_list, all_pax_attr_list, conv_list, req_repl = [], [], [], [], [], [], [], pd.DataFrame()
 
     # Loop over replications (adding all replications of the scenario to a single dataframe)
     for repl_folder in folder_names:
@@ -90,6 +90,8 @@ for scn_name in scenario_names:
                 plf_attr_list = create_attr_df_list(repl_id, repl_folder_path, item, index_name='id', attr_df_list=plf_attr_list)
             if item.endswith('4_out-filter-pax.csv'):
                 all_pax_attr_list = create_attr_df_list(repl_id, repl_folder_path, item, index_name='pax_id', attr_df_list=all_pax_attr_list)
+            if item.endswith('5_conv-indicators.csv'):
+                conv_list = create_attr_df_list(repl_id, repl_folder_path, item, index_name='day', attr_df_list=conv_list)
 
     print('All dataframes have been loaded')
     # Concat the list of dataframes into a single dataframe
@@ -99,6 +101,7 @@ for scn_name in scenario_names:
     driver_attr = pd.concat(driver_attr_list).rename_axis(index={'veh_id': 'veh'})
     plf_attr = pd.concat(plf_attr_list)
     all_pax_attr = pd.concat(all_pax_attr_list)
+    conv_df = pd.concat(conv_list)
 
     # Sort multi-index df's
     d2d_pax = d2d_pax.sort_index(level=['repl','day','pax'])
@@ -107,6 +110,7 @@ for scn_name in scenario_names:
     driver_attr = driver_attr.sort_index(level=['repl','veh'])
     plf_attr = plf_attr.sort_index(level=['repl','id'])
     all_pax_attr = all_pax_attr.sort_index(level=['repl','pax_id'])
+    conv_df = conv_df.sort_index(level=['repl','day'])
 
     # Convert chosen_mode column to column per mode, with boolean values
     alt_mode_list = d2d_pax.chosen_mode.unique().tolist()
@@ -179,8 +183,6 @@ for scn_name in scenario_names:
     d2d_pax_stats['perc_km_fare_mh'] = pivot_result['init_perc_km_fare_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['perc_km_fare_sh_0'] = pivot_result['init_perc_km_fare_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['perc_km_fare_sh_1'] = pivot_result['init_perc_km_fare_1'][False] if any_trav_sh and 'init_perc_km_fare_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['perc_util_mh'] = pivot_result['relev_perc_util'][True] if any_trav_mh else np.nan
-    d2d_pax_stats['perc_util_sh'] = pivot_result['relev_perc_util'][False] if any_trav_sh else np.nan
 
     # Created population-level statistics (aggregate over agents) for each replication - on the demand side
     mean_indicators, count_indicators = [], []
@@ -301,8 +303,6 @@ for scn_name in scenario_names:
     d2d_veh_stats['perc_inc_mh'] = pivot_result['init_perc_inc_0'][True] if any_driver_mh else np.nan
     d2d_veh_stats['perc_inc_sh_0'] = pivot_result['init_perc_inc_0'][False] if any_driver_sh else np.nan
     d2d_veh_stats['perc_inc_sh_1'] = pivot_result['init_perc_inc_1'][False] if any_driver_sh and 'init_perc_inc_1' in pivot_result.columns else np.nan
-    d2d_veh_stats['perc_util_mh'] = pivot_result['relev_perc_util'][True] if any_driver_mh else np.nan
-    d2d_veh_stats['perc_util_sh'] = pivot_result['relev_perc_util'][False] if any_driver_sh else np.nan
     d2d_veh_stats[['new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']] = d2d_veh_reset.groupby(['repl', 'day'])[count_indicators].sum()[['new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']]
 
     # Create the pivot results - multihoming / registered
@@ -425,14 +425,6 @@ for scn_name in scenario_names:
             plt.title('Participating drivers with platform {}'.format(plf_id))
             plt.legend(title='repl')
             plt.savefig(os.path.join(aggr_scn_path, 'evo_ptcp_sup_{}.png'.format(plf_id)))
-        if col == 'relev_perc_util':
-            aggregated = d2d_veh.groupby(['repl', 'day']).agg({col: 'mean'})
-            aggregated.unstack('repl').plot(kind='line', figsize=(10, 6))
-            plt.xlabel('Day')
-            plt.ylabel('utility')
-            plt.title('Expected utility of ride-hailing (registered job seekers)')
-            plt.legend(title='repl')
-            plt.savefig(os.path.join(aggr_scn_path, 'perc_util_sup.png'))
     for col in d2d_pax.columns:
         if col.startswith('requests'):
             plf_id = col.split("_")[-1]
@@ -443,32 +435,18 @@ for scn_name in scenario_names:
             plt.title('Participating travellers with platform {}'.format(plf_id))
             plt.legend(title='repl')
             plt.savefig(os.path.join(aggr_scn_path, 'evo_ptcp_dem_{}.png'.format(plf_id)))
-        if col == 'relev_perc_util':
-            aggregated = d2d_pax.groupby(['repl', 'day']).agg({col: 'mean'})
-            aggregated.unstack('repl').plot(kind='line', figsize=(10, 6))
-            plt.xlabel('Day')
-            plt.ylabel('utility')
-            plt.title('Expected utility of ride-hailing (registered travellers)')
-            plt.legend(title='repl')
-            plt.savefig(os.path.join(aggr_scn_path, 'perc_util_dem.png'))
 
     # Now select rows corresponding to equilibrium - should be done per replication
-    eql_pax = d2d_pax.groupby(['repl', 'pax']).tail(conv_steady_days + moving_average_days)
-    eql_veh = d2d_veh.groupby(['repl', 'veh']).tail(conv_steady_days + moving_average_days)
+    eql_df = conv_df.groupby(['repl']).tail(conv_steady_days + moving_average_days)
 
     # For each perceived platform indicator, determine how many replications are needed based on values in an initial number of replications
     current_n_repl = len(d2d_pax.index.get_level_values('repl').unique()) # current number of replications to determine degrees of freedom
     req_repl_indicator = dict()
-    col = 'relev_perc_util'
-    avg_repl_perc_indicator = eql_pax.groupby('repl')[col].mean().mean()
-    std_repl_perc_indicator = eql_pax.groupby('repl')[col].mean().std()
-    indicator = 'relev_perc_util_travs'
-    req_repl_indicator[indicator] = determine_req_repl_indicator(current_n_repl, avg_repl_perc_indicator, std_repl_perc_indicator, conv_signif, conv_max_error)
-    avg_repl_perc_indicator = eql_veh.groupby('repl')[col].mean().mean()
-    std_repl_perc_indicator = eql_veh.groupby('repl')[col].mean().std()
-    indicator = 'relev_perc_util_drivers'
-    req_repl_indicator[indicator] = determine_req_repl_indicator(current_n_repl, avg_repl_perc_indicator, std_repl_perc_indicator, conv_signif, conv_max_error)
-    
+    indicators = ['expected_ptcp_dem_mh','expected_ptcp_dem_sh_0','expected_ptcp_sup_mh','expected_ptcp_sup_sh_0','expected_ptcp_dem_sh_1','expected_ptcp_sup_sh_1']
+    for indic in indicators:
+        avg_repl_perc_indicator = eql_df.groupby('repl')[indic].mean().mean()
+        std_repl_perc_indicator = eql_df.groupby('repl')[indic].std().mean()
+        req_repl_indicator[indic] = determine_req_repl_indicator(current_n_repl, avg_repl_perc_indicator, std_repl_perc_indicator, conv_signif, conv_max_error)
     req_n_repl = max(req_repl_indicator.values())
     # Check if insufficient replications have been run for scenario
     if current_n_repl >= req_n_repl: 
@@ -481,6 +459,25 @@ for scn_name in scenario_names:
     req_repl = req_repl.append({**req_repl_indicator, **scn_dict}, ignore_index=True)
     req_repl = req_repl.set_index(list(keys))
     
+    # Plot the convergence indicators
+    sup_ptcp = ['expected_ptcp_sup_mh','expected_ptcp_sup_sh_0','expected_ptcp_sup_sh_1']
+    aggregated = conv_df[sup_ptcp].groupby(['repl']).mean() #agg({col: 'mean'})
+    aggregated.unstack('repl').plot(kind='line', figsize=(10, 6))
+    plt.xlabel('Day')
+    plt.ylabel('Drivers')
+    plt.title('Expected fleet size')
+    plt.legend(title='repl')
+    plt.savefig(os.path.join(aggr_scn_path, 'perc_ptcp_sup.png'))
+
+    dem_ptcp = ['expected_ptcp_dem_mh','expected_ptcp_dem_sh_0','expected_ptcp_dem_sh_1']
+    aggregated = conv_df[dem_ptcp].groupby(['repl']).mean()
+    aggregated.unstack('repl').plot(kind='line', figsize=(10, 6))
+    plt.xlabel('Day')
+    plt.ylabel('Requests')
+    plt.title('Expected demand')
+    plt.legend(title='repl')
+    plt.savefig(os.path.join(aggr_scn_path, 'perc_ptcp_dem.png'))
+
     # Save the aggregated dataframe for this scenario in pickle format
     with open(os.path.join(aggr_scn_path, 'aggr_dem.pkl'), 'wb') as f:
         pickle.dump(aggr_dem_df, f)
