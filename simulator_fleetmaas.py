@@ -335,13 +335,13 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         if d2d_perc_util.shape[0] >= (params.convergence.moving_avg + params.convergence.req_steady_days + 1): # first day that convergence is possible
             if params.convergence.get('abs_ptcp_diff_dem', False) and params.convergence.get('abs_ptcp_diff_sup', False):
                 rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).diff().tail(params.convergence.req_steady_days)
-                rel_diff_ma_df['dem_mh_conv'] = rel_diff_ma_df.expected_ptcp_dem_mh.abs() < params.convergence.abs_ptcp_diff_dem * params.convergence.moving_avg
-                rel_diff_ma_df['dem_sh_0_conv'] = rel_diff_ma_df.expected_ptcp_dem_sh_0.abs() < params.convergence.abs_ptcp_diff_dem * params.convergence.moving_avg
-                rel_diff_ma_df['sup_mh_conv'] = rel_diff_ma_df.expected_ptcp_sup_mh.abs() < params.convergence.abs_ptcp_diff_sup * params.convergence.moving_avg
-                rel_diff_ma_df['sup_sh_0_conv'] = rel_diff_ma_df.expected_ptcp_sup_sh_0.abs() < params.convergence.abs_ptcp_diff_sup * params.convergence.moving_avg
+                rel_diff_ma_df['dem_mh_conv'] = rel_diff_ma_df.expected_ptcp_dem_mh.abs() < params.convergence.abs_ptcp_diff_dem
+                rel_diff_ma_df['dem_sh_0_conv'] = rel_diff_ma_df.expected_ptcp_dem_sh_0.abs() < params.convergence.abs_ptcp_diff_dem
+                rel_diff_ma_df['sup_mh_conv'] = rel_diff_ma_df.expected_ptcp_sup_mh.abs() < params.convergence.abs_ptcp_diff_sup
+                rel_diff_ma_df['sup_sh_0_conv'] = rel_diff_ma_df.expected_ptcp_sup_sh_0.abs() < params.convergence.abs_ptcp_diff_sup
                 if inData.platforms.shape[0] > 1:
-                    rel_diff_ma_df['dem_sh_1_conv'] = rel_diff_ma_df.expected_ptcp_dem_sh_1.abs() < params.convergence.abs_ptcp_diff_dem * params.convergence.moving_avg
-                    rel_diff_ma_df['sup_sh_1_conv'] = rel_diff_ma_df.expected_ptcp_sup_sh_1.abs() < params.convergence.abs_ptcp_diff_sup * params.convergence.moving_avg
+                    rel_diff_ma_df['dem_sh_1_conv'] = rel_diff_ma_df.expected_ptcp_dem_sh_1.abs() < params.convergence.abs_ptcp_diff_dem
+                    rel_diff_ma_df['sup_sh_1_conv'] = rel_diff_ma_df.expected_ptcp_sup_sh_1.abs() < params.convergence.abs_ptcp_diff_sup
                     conv_per_indicator = rel_diff_ma_df[['dem_mh_conv','dem_sh_0_conv','dem_sh_1_conv','sup_mh_conv','sup_sh_0_conv','sup_sh_1_conv']].all()
                 else:
                     conv_per_indicator = rel_diff_ma_df[['dem_mh_conv','dem_sh_0_conv','sup_mh_conv','sup_sh_0_conv']].all()
