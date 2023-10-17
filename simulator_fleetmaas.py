@@ -241,7 +241,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     del all_pax, all_req, all_pax_df
 
     # Initialise convergence
-    d2d_perc_util = pd.DataFrame()
+    d2d_conv = pd.DataFrame()
 
     # Day-to-day simulator
     for day in range(params.get('nD', 1)):  # run iterations
@@ -305,13 +305,13 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.vehicles.informed = wom_driver(inData, params=params)   # which job seekers are informed about ride-hailing
         
         # (De-)registration decisions
-        inData.vehicles, conv_sup_df = platform_regist_driver(inData, drivers_summary, params=params)
+        inData.vehicles = platform_regist_driver(inData, drivers_summary, params=params)
         inData.vehicles.pos = fixed_supply.pos
 
         # Demand-side diffusion of platform information
         res_inf_trav = wom_trav(inData, travs_summary, params=params)
         inData.passengers.informed = res_inf_trav.informed
-        inData, conv_dem_df = platform_regist_trav(inData, travs_summary, params=params)
+        inData = platform_regist_trav(inData, travs_summary, params=params)
 
         # Store KPIs of day
         dem_df, sup_df = d2d_summary_day(drivers_summary, travs_summary)
@@ -319,35 +319,39 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
 
         ### Determine convergence
-        # Create new dataframe containing perceived utilities of all days
-        conv_indic = pd.DataFrame([{'expected_ptcp_dem_mh': conv_dem_df['expected_req_mh'], 'expected_ptcp_dem_sh_0': conv_dem_df['expected_req_sh_0'], 
-                                    'expected_ptcp_sup_mh': conv_sup_df['expected_ptcp_mh'], 'expected_ptcp_sup_sh_0': conv_sup_df['expected_ptcp_sh_0']}])
+        # Create new dataframe containing (experienced) participation values of all days
+        travs_summary['requests_mh'] = travs_summary.apply(lambda row: row.requests.sum() > 1, axis=1)
+        travs_summary['requests_sh_0'] = travs_summary.apply(lambda row: int(row['requests'][0]) * int(not row['requests_mh']), axis=1)
+        drivers_summary['ptcp_mh'] = drivers_summary.apply(lambda row: ((~row.out).sum() > 1), axis=1)
+        drivers_summary['ptcp_sh_0'] = drivers_summary.apply(lambda row: int(not row['out'][0]) * int(not row['ptcp_mh']), axis=1)
+        conv_indic = pd.DataFrame([{'ptcp_dem_mh': travs_summary['requests_mh'].sum(), 'ptcp_dem_sh_0': travs_summary['requests_sh_0'].sum(), 
+                                    'ptcp_sup_mh': drivers_summary['ptcp_mh'].sum(), 'ptcp_sup_sh_0': drivers_summary['ptcp_sh_0'].sum()}])
         if inData.platforms.shape[0] > 1: # more than one platform
-            conv_indic['expected_ptcp_dem_sh_1'] = conv_dem_df['expected_req_sh_1']
-            conv_indic['expected_ptcp_sup_sh_1'] = conv_sup_df['expected_ptcp_sh_1']
-        d2d_perc_util = pd.concat([d2d_perc_util, conv_indic])
+            conv_indic['ptcp_dem_sh_1'] = travs_summary.apply(lambda row: int(row['requests'][1]) * int(not row['requests_mh']), axis=1).sum()
+            conv_indic['ptcp_sup_sh_1'] = drivers_summary.apply(lambda row: int(not row['out'][1]) * int(not row['ptcp_mh']), axis=1).sum()
+        d2d_conv = pd.concat([d2d_conv, conv_indic])
         # Create a copy of the csv by adding the last row to the already existing csv
         if day == 0: # include the headers on the first day
             conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=True)
         else:
             conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=False)
         
-        if d2d_perc_util.shape[0] >= (params.convergence.moving_avg + params.convergence.req_steady_days + 1): # first day that convergence is possible
+        if d2d_conv.shape[0] >= (params.convergence.get('first_moving_avg', 20) + params.convergence.get('second_moving_avg', 20) + params.convergence.get('req_steady_days', 10) + 1): # first day that convergence is possible
             if params.convergence.get('abs_ptcp_diff_dem', False) and params.convergence.get('abs_ptcp_diff_sup', False):
-                rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).diff().tail(params.convergence.req_steady_days)
-                rel_diff_ma_df['dem_mh_conv'] = rel_diff_ma_df.expected_ptcp_dem_mh.abs() < params.convergence.abs_ptcp_diff_dem
-                rel_diff_ma_df['dem_sh_0_conv'] = rel_diff_ma_df.expected_ptcp_dem_sh_0.abs() < params.convergence.abs_ptcp_diff_dem
-                rel_diff_ma_df['sup_mh_conv'] = rel_diff_ma_df.expected_ptcp_sup_mh.abs() < params.convergence.abs_ptcp_diff_sup
-                rel_diff_ma_df['sup_sh_0_conv'] = rel_diff_ma_df.expected_ptcp_sup_sh_0.abs() < params.convergence.abs_ptcp_diff_sup
+                rel_diff_ma_df = d2d_conv.rolling(params.convergence.get('first_moving_avg', 20)).mean().rolling(params.convergence.get('second_moving_avg', 20)).mean().tail(params.convergence.get('req_steady_days', 10) + 1).diff()
+                rel_diff_ma_df['dem_mh_conv'] = rel_diff_ma_df.ptcp_dem_mh.abs() < params.convergence.abs_ptcp_diff_dem
+                rel_diff_ma_df['dem_sh_0_conv'] = rel_diff_ma_df.ptcp_dem_sh_0.abs() < params.convergence.abs_ptcp_diff_dem
+                rel_diff_ma_df['sup_mh_conv'] = rel_diff_ma_df.ptcp_sup_mh.abs() < params.convergence.abs_ptcp_diff_sup
+                rel_diff_ma_df['sup_sh_0_conv'] = rel_diff_ma_df.ptcp_sup_sh_0.abs() < params.convergence.abs_ptcp_diff_sup
                 if inData.platforms.shape[0] > 1:
-                    rel_diff_ma_df['dem_sh_1_conv'] = rel_diff_ma_df.expected_ptcp_dem_sh_1.abs() < params.convergence.abs_ptcp_diff_dem
-                    rel_diff_ma_df['sup_sh_1_conv'] = rel_diff_ma_df.expected_ptcp_sup_sh_1.abs() < params.convergence.abs_ptcp_diff_sup
+                    rel_diff_ma_df['dem_sh_1_conv'] = rel_diff_ma_df.ptcp_dem_sh_1.abs() < params.convergence.abs_ptcp_diff_dem
+                    rel_diff_ma_df['sup_sh_1_conv'] = rel_diff_ma_df.ptcp_sup_sh_1.abs() < params.convergence.abs_ptcp_diff_sup
                     conv_per_indicator = rel_diff_ma_df[['dem_mh_conv','dem_sh_0_conv','dem_sh_1_conv','sup_mh_conv','sup_sh_0_conv','sup_sh_1_conv']].all()
                 else:
                     conv_per_indicator = rel_diff_ma_df[['dem_mh_conv','dem_sh_0_conv','sup_mh_conv','sup_sh_0_conv']].all()
             else:
                 conv_factor = params.convergence.get('factor', 0.01)
-                rel_diff_ma_df = d2d_perc_util.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).pct_change().tail(params.convergence.req_steady_days)
+                rel_diff_ma_df = d2d_conv.rolling(params.convergence.moving_avg).mean().tail(params.convergence.req_steady_days + 1).pct_change().tail(params.convergence.req_steady_days)
                 conv_per_indicator = (rel_diff_ma_df.abs() < conv_factor).all()
             if conv_per_indicator.all():
                 print('Scenario {} - All indicators have converged at end of day {}, day-to-day simulation is terminated.'.format(scn_name, day))
