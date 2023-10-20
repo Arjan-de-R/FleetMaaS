@@ -26,8 +26,8 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
         pax_exp.index.name = 'pax'
         pax_exp['TRAVEL'] = req_kpis.dropoff_time - req_kpis.pickup_time - 30 # total travel time
         pax_exp['WAIT'] = req_kpis.pickup_time - req_kpis.rq_time
-        pax_exp['OPERATIONS'] = 60 # 30 sec for accessing and egressing the vehicle
-        pax_exp['detour'] = req_kpis.dropoff_time - req_kpis.pickup_time - req_kpis.direct_route_travel_time - pax_exp.OPERATIONS # detour time
+        pax_exp['OPERATIONS'] = 30
+        pax_exp['detour'] = (req_kpis.dropoff_time - req_kpis.pickup_time - req_kpis.direct_route_travel_time - pax_exp.OPERATIONS) / req_kpis.direct_route_travel_time # relative detour time
         pax_exp['fare'] = req_kpis.fare / 100
         pax_exp['platform'] = req_kpis.operator_id
         pax_exp['LOSES_PATIENCE'] = req_kpis.apply(lambda row: ~offer_received(row), axis=1)
