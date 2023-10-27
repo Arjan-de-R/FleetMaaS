@@ -342,7 +342,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         
         if d2d_conv.shape[0] >= (params.convergence.get('first_moving_avg', 20) + params.convergence.get('second_moving_avg', 20) + params.convergence.get('req_steady_days', 10) + 1): # first day that convergence is possible
             if params.convergence.get('abs_ptcp_diff_dem', False) and params.convergence.get('abs_ptcp_diff_sup', False):
-                rel_diff_ma_df = d2d_conv.rolling(params.convergence.get('first_moving_avg', 20)).mean().rolling(params.convergence.get('second_moving_avg', 20)).mean().tail(params.convergence.get('req_steady_days', 10) + 1).diff()
+                rel_diff_ma_df = d2d_conv.rolling(params.convergence.get('first_moving_avg', 20)).mean().rolling(params.convergence.get('second_moving_avg', 20)).mean().diff().tail(params.convergence.get('req_steady_days', 10))
                 rel_diff_ma_df['dem_mh_conv'] = rel_diff_ma_df.ptcp_dem_mh.abs() < params.convergence.abs_ptcp_diff_dem
                 rel_diff_ma_df['dem_sh_0_conv'] = rel_diff_ma_df.ptcp_dem_sh_0.abs() < params.convergence.abs_ptcp_diff_dem
                 rel_diff_ma_df['sup_mh_conv'] = rel_diff_ma_df.ptcp_sup_mh.abs() < params.convergence.abs_ptcp_diff_sup
