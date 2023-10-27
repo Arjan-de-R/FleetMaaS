@@ -132,7 +132,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData = sample_from_database(inData, params)  # sample nP and create inData.passengers
     else:
         # Generate requests - either based on a distribution or taken from Albatross - and corresponding passenger data
-        inData = generate_demand(inData, params, avg_speed = True)
+        inData = generate_demand(inData, params, avg_speed = False)
 
     if params.paths.get('vehicles', False):
         inData = read_vehicle_positions(inData, path=params.paths.vehicles)
@@ -192,7 +192,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         demand_name = network_name
         if not os.path.exists(os.path.join(fleetpy_dir, "data", "networks", network_name)):
             graphml_file = params.paths.G
-            create_network_from_graphml(graphml_file, network_name)
+            create_network_from_graphml(graphml_file, network_name, params)
+        bike_network_name = '{}_bike'.format(network_name)
+        if not os.path.exists(os.path.join(fleetpy_dir, "data", "networks", bike_network_name)):
+            graphml_file = params.paths.G
+            create_network_from_graphml(graphml_file, bike_network_name, params)
         # Determine which MaaSSim nodes are in which zones
         zone_name = params.city.split(",")[0]
         inData.nodes['geometry'] = geopandas.points_from_xy(inData.nodes['x'],inData.nodes['y'])

@@ -11,13 +11,16 @@ from FleetPy.src.preprocessing.networks.network_manipulation import FullNetwork
 from FleetPy.src.preprocessing.networks.create_travel_time_tables import create_travel_time_table
 
 
-def create_network_from_graphml(graphml_file, network_name):
+def create_network_from_graphml(graphml_file, network_name, params):
     """ this function reads the graphml file and creates fleetpy network files
     output files are stored at fleetpy_dir/data/networks/{network_name}
     
     :param network_name: folder name of network (output folder files will be stored here)
     :param graphml_file: path to the graphml_file"""
     
+    # is the network a car network, if not it is a bike network
+    car_network = not network_name.endswith('_bike')
+
     graph = nx.read_graphml(graphml_file)
     # read nodes
     nodes_df_list = []
@@ -52,24 +55,28 @@ def create_network_from_graphml(graphml_file, network_name):
         # infer edge speeds if not data given
         if len(graph.edges[edge]["highway"].split(",")) > 1: # if link has different kind of lanes
             graph.edges[edge]["highway"] = graph.edges[edge]["highway"].replace("[","").replace("]","").replace("'","").split(",")[0] # assume first lane type for all
-        try:
-            speed = graph.edges[edge]["maxspeed"]
-            if len(speed.split(",")) > 1:
-                speed = speed.split(",")[0][2:-1:]
-                #print("was list!", speed)
-        except KeyError:
-            if graph.edges[edge]["highway"] in ["residential", "road"]:
-                speed = 30
-            elif graph.edges[edge]["highway"] == "living_street":
-                speed = 15
-            elif graph.edges[edge]["highway"] in ["unclassified", "primary", "secondary", "tertiary", "primary_link", "secondary_link", "tertiary_link"]:
-                speed = 50
-            elif graph.edges[edge]["highway"] in ["motorway_link", "motorway"]:
-                speed = 100
-            elif graph.edges[edge]["highway"] in ["trunk_link", "trunk"]:
-                speed = 80
-            else:
-                raise KeyError
+        if car_network: # car network
+            try:
+                speed = graph.edges[edge]["maxspeed"]
+                if len(speed.split(",")) > 1:
+                    speed = speed.split(",")[0][2:-1:]
+                    #print("was list!", speed)
+            except KeyError:
+                if graph.edges[edge]["highway"] in ["residential", "road"]:
+                    speed = 30
+                elif graph.edges[edge]["highway"] == "living_street":
+                    speed = 15 
+                elif graph.edges[edge]["highway"] in ["unclassified", "primary", "secondary", "tertiary", "primary_link", "secondary_link", "tertiary_link"]:
+                    speed = 50
+                elif graph.edges[edge]["highway"] in ["motorway_link", "motorway"]:
+                    speed = 100
+                elif graph.edges[edge]["highway"] in ["trunk_link", "trunk"]:
+                    speed = 80
+                else:
+                    raise KeyError
+            speed = float(speed) * params.speeds.get('congestion_factor', 1)
+        else:
+            speed = params.speeds.get('bike', 4.166666) * 3.6
         travel_time = float(length)/float(speed)*3.6
         
         if graph.edges[edge].get("geometry"):
