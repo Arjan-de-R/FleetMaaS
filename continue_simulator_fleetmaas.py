@@ -1,7 +1,6 @@
 ################################################################################
-# Module: runners.py
-# Description: Wrappers to prepare and run simulations
-# Rafal Kucharski @ TU Delft
+# Module: continue_simulator_fleetmaas.py
+# Description: Wrappers to prepare and run simulations - continuing previously terminated simulation
 ################################################################################
 
 import os.path
@@ -81,7 +80,7 @@ def single_pararun(one_slice, *args):
     return 0
 
 
-def simulate_parallel(config="MaaSSim/data/config/parallel.json", inData=None, params=None, search_space=None, **kwargs):
+def continue_simulate_parallel(config="MaaSSim/data/config/parallel.json", inData=None, params=None, search_space=None, **kwargs):
     if inData is None:  # otherwise we use what is passed
         from MaaSSim.src_MaaSSim.data_structures import structures
         inData = structures.copy()  # fresh data
@@ -121,69 +120,19 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         from MaaSSim.src_MaaSSim.utils import make_config_paths
         params = make_config_paths(params, main = kwargs.get('make_main_path',False), rel = True)
 
-    if params.paths.get('requests', False):
-        inData = read_requests_csv(inData, params.paths.requests) # read request file
-        if params.nP > inData.requests.shape[0]:
-            raise Exception("Number of travellers is larger than demand dataset")
-        if params.paths.get('PT_trips',False):
-            pt_trips = load_OTP_result(params) # load output of OpenTripPlanner queries for the preprocessed requests and add resulting PT attributes to inData.requests
-            inData.requests = pd.concat([inData.requests, pt_trips], axis=1)
-            del pt_trips
-        inData = sample_from_database(inData, params)  # sample nP and create inData.passengers
-    else:
-        # Generate requests - either based on a distribution or taken from Albatross - and corresponding passenger data
-        inData = generate_demand(inData, params, avg_speed = False)
-
-    if params.paths.get('vehicles', False):
-        inData = read_vehicle_positions(inData, path=params.paths.vehicles)
-
     if len(inData.G) == 0:  # only if no graph in input
         inData = load_G(inData, params, stats=True)  # download graph for the 'params.city' and calc the skim matrices
 
     # Set random seeds used throughout the simulation
     np.random.seed(params.repl_id)
     random.seed(params.repl_id)
-
-    # Set properties of platform(s)
-    inData.platforms = pd.concat([inData.platforms,pd.DataFrame(columns=['base_fare','comm_rate','min_fare','match_obj','max_wait_time','max_rel_detour'])])
-    inData.platforms = initialize_df(inData.platforms)
-    if not params.platforms.get('service_types'): # if service type(s) are not provided
-        params.platforms.service_types = ['solo']
-    for plat_id in range(0,len(params.platforms.service_types)):
-        # initialise solo platform
-        if params.platforms.service_types[plat_id] == 'solo':
-            inData.platforms.loc[plat_id] = init_solo_plf(params, plat_id)
-        else:
-            inData.platforms.loc[plat_id] = init_pooling_plf(params, plat_id)
-
-    # Generate mode preferences
-    inData.passengers = prefs_travs(inData, params)
-
-    all_req = inData.requests.copy()
-    all_pax = mode_filter(inData, params)
-    inData.passengers = all_pax[all_pax.mode_choice == "day-to-day"]
-    inData.requests = inData.requests[inData.requests.index.isin(inData.passengers.index)]
-    inData.passengers.reset_index(drop=True, inplace=True)
-    inData.requests.reset_index(drop=True, inplace=True)
-    inData.requests['pax_id'] = inData.requests.index
-
-    # Generate information available to travellers at the start of the simulation, and whether travellers are willing to multi-home
-    inData.passengers = set_multihoming_travellers(inData.passengers, params)
-    inData.passengers['informed'] = np.random.rand(len(inData.passengers)) < params.evol.travellers.inform.prob_start
-    inData.passengers = start_regist_travs(inData, params)
-    
-    # Generate pool of job seekers, incl. setting multi-homing behaviour
-    fixed_supply = generate_vehicles_d2d(inData, params)
-    
-    # correct 
-    inData.vehicles = fixed_supply.copy()
     
     # Load path
     if path is None:
         path = os.getcwd()
 
     # Prepare schedule for shared rides and the within-day simulator
-    inData = prep_shared_rides(inData, params.shareability)  # prepare schedules
+    # inData = prep_shared_rides(inData, params.shareability)  # prepare schedules
     if params.paths.get('fleetpy_config', False): # initialise FleetPy
         fleetpy_dir = os.path.join(path, 'FleetPy')
         fleetpy_study_name = params.get('study_name', 'MaaSSim_FleetPy')
@@ -203,9 +152,6 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         zones = geopandas.read_file(os.path.join(fleetpy_dir, "data", "zones", zone_name, "polygon_definition.geojson"))
         inData.nodes["zone_id"] = inData.nodes.apply(lambda row: get_init_zone_id(row, zones), axis=1)
         constant_config_file = os.path.join(fleetpy_dir,'studies','{}'.format(fleetpy_study_name),'scenarios','{}'.format(config_file))
-        # Add zone id to passenger df
-        inData.passengers['zone_id'] = inData.passengers.apply(lambda x: inData.nodes.zone_id.loc[x.pos], axis=1)
-        # Expected (perceived) demand per zone (for the first day)
         perc_demand = pd.DataFrame(index=zones.zone_id, columns=['requests'])
         perc_demand.requests = 1 # assume equal demand in all zones for first day
         # Initialize MaaSSim simulator object to which FleetPy results are returned
@@ -220,35 +166,65 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     # Where are the (final) results of the day-to-day simulation be stored
     scn_name = kwargs.get('scn_name')
-    if not os.path.exists(os.path.join(path,'results')):
-        os.mkdir(os.path.join(path,'results'))
     result_path = os.path.join(path, 'results', scn_name)
-    if not os.path.exists(result_path):
-        os.mkdir(result_path)
-    elif os.path.exists(os.path.join(result_path,"5_perc-utilities.csv")):
-        os.remove(os.path.join(result_path,"5_perc-utilities.csv"))
     
     params.t0 = params.t0.to_pydatetime().strftime('%Y-%m-%d %H:%M:%S')
-    with open(os.path.join(result_path, '0_params.json'), 'w') as json_file:
-        json.dump(params, json_file)
-    
-    df_req = inData.requests[['pax_id','origin','destination','treq','dist','ttrav']]
-    if 'haver_dist' in inData.requests.columns:
-        df_req['haver_dist'] = inData.requests['haver_dist']
-    df_pax = inData.passengers[['VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming']]
-    pd.concat([df_req, df_pax], axis=1).to_csv(os.path.join(result_path,'1_pax-properties.csv'))
-    inData.vehicles[['pos', 'res_wage', 'multihoming']].to_csv(os.path.join(result_path,'2_driver-properties.csv'))
-    inData.platforms.to_csv(os.path.join(result_path, '3_platform-properties.csv'))
-    all_pax_df = pd.concat([all_req, all_pax], axis=1)
-    all_pax_df = all_pax_df[all_pax_df.mode_choice != 'day-to-day']
-    all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_choice']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
-    del all_pax, all_req, all_pax_df
 
+    # Load inData.vehicles, inData.passengers, inData.platforms
+    pax_properties = pd.read_csv(os.path.join(result_path, '1_pax-properties.csv'), index_col=0)
+    driver_properties = pd.read_csv(os.path.join(result_path, '2_driver-properties.csv'),index_col=0)
+    inData.platforms = pd.read_csv(os.path.join(result_path, '3_platform-properties.csv'))
+    
     # Initialise convergence
     d2d_conv = pd.DataFrame()
 
-    # Day-to-day simulator
-    for day in range(params.get('nD', 1)):  # run iterations
+    ### Day-to-day simulator
+
+    # First decide which was the last day based on the d2d_conv
+    conv_indic = pd.read_csv(os.path.join(result_path,'5_conv-indicators.csv'))
+    last_day = conv_indic.shape[0] - 2
+    d2d_conv = pd.concat([d2d_conv, conv_indic])
+    
+    # First we need to test whether sim has not converged already, if not, we continue the simulation from the next day
+    determine_convergence(inData, d2d_conv, params, scn_name, last_day)
+
+    # First open the output files from the last day, then create the inData df's
+    df_paxx = pd.read_csv(os.path.join(result_path, 'day_{}_travs.csv'.format(last_day)), index_col=0)
+    df_drivers = pd.read_csv(os.path.join(result_path, 'day_{}_drivers.csv'.format(last_day)), index_col=0)
+    inData.passengers = pd.concat([pax_properties, df_paxx], axis=1)
+    inData.requests = pax_properties.reset_index()[['origin','destination','treq','ttrav','dist','pax_id']]
+    inData.requests.ttrav = pd.to_timedelta(inData.requests.ttrav)
+    inData.passengers.drop(['origin','destination','treq','ttrav','dist','pax_id'],axis=1, inplace=True)
+    inData.vehicles = pd.concat([driver_properties,df_drivers], axis=1)
+
+    # Convert dataframe columns
+    if inData.platforms.shape[0] > 1:
+        inData.passengers['registered'] = inData.passengers.apply(lambda row: np.array([row.registered_0, row.registered_1]), axis=1)
+        inData.passengers['expected_wait'] = inData.passengers.apply(lambda row: np.array([row.expected_wait_0, row.expected_wait_1]), axis=1)
+        inData.passengers['expected_ivt'] = inData.passengers.apply(lambda row: np.array([row.expected_ivt_0, row.expected_ivt_1]), axis=1)
+        inData.passengers['expected_km_fare'] = inData.passengers.apply(lambda row: np.array([row.expected_km_fare_0, row.expected_km_fare_1]), axis=1)
+        inData.vehicles['registered'] = inData.vehicles.apply(lambda row: np.array([row.registered_0, row.registered_1]), axis=1)
+        inData.vehicles['expected_income'] = inData.vehicles.apply(lambda row: np.array([row.expected_income_0, row.expected_income_1]), axis=1)
+    else:
+        inData.passengers['registered'] = inData.passengers.apply(lambda row: np.array([row.registered_0]), axis=1)
+        inData.passengers['expected_wait'] = inData.passengers.apply(lambda row: np.array([row.expected_wait_0]), axis=1)
+        inData.passengers['expected_ivt'] = inData.passengers.apply(lambda row: np.array([row.expected_ivt_0]), axis=1)
+        inData.passengers['expected_km_fare'] = inData.passengers.apply(lambda row: np.array([row.expected_km_fare_0]), axis=1)
+        inData.vehicles['registered'] = inData.vehicles.apply(lambda row: np.array([row.registered_0]), axis=1)
+        inData.vehicles['expected_income'] = inData.vehicles.apply(lambda row: np.array([row.expected_income_0]), axis=1)
+    inData.passengers['platforms'] = 0
+    inData.vehicles['platform'] = 0
+    inData.vehicles['shift_start'] = 0
+    inData.vehicles['shift_end'] = 86400
+    inData.vehicles['rejected_reg'] = False
+    inData.passengers['pos'] = inData.requests.origin
+    inData.passengers['zone_id'] = inData.passengers.apply(lambda x: inData.nodes.zone_id.loc[x.pos], axis=1)
+    fixed_supply = inData.vehicles[['pos','shift_start']].copy()
+
+    # Load random seeds
+    set_random_states(result_path)
+
+    for day in range(last_day+1, params.get('nD', 1)):  # run iterations
 
         #----- Pre-day -----#
         inData.passengers = mode_preday(inData, params) # mode choice
