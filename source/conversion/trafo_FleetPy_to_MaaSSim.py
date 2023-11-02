@@ -68,11 +68,13 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
         if 'driver_id' in plf_kpis.columns:
             plf_kpis = plf_kpis.set_index('driver_id')
         if plf == len(inData.platforms.index): # the repositioning dataframe, not an actual platform
-            plf_kpis['pickup_dist'] = 0
-            plf_kpis['repos_dist'] = plf_kpis['km occ 0']
+            if 'km occ 0' in plf_kpis.columns: # at least one of the platforms has at least one driver
+                plf_kpis['pickup_dist'] = 0
+                plf_kpis['repos_dist'] = plf_kpis['km occ 0']
         else: # corresponding to platform
-            plf_kpis['pickup_dist'] = plf_kpis['km occ 0']
-            plf_kpis['repos_dist'] = 0
+            if 'km occ 0' in plf_kpis.columns:
+                plf_kpis['repos_dist'] = 0
+                plf_kpis['pickup_dist'] = plf_kpis['km occ 0']
             
         aggr_kpis = pd.concat([aggr_kpis, plf_kpis])
     
