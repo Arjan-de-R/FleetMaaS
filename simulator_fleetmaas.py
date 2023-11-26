@@ -56,7 +56,8 @@ def single_pararun(one_slice, *args):
         cmpt_type_string = "".join([item[0] for item in params.platforms.service_types])
         scn_name = '-{}'.format(cmpt_type_string)
     for key, value in stamp.items():
-        scn_name += '-{}-{}'.format(key, value)
+        if key != 'service_types':
+            scn_name += '-{}-{}'.format(key, value)
     scn_name = re.sub('[^-a-zA-Z0-9_.() ]+', '', scn_name)[1:]
 
     # Set-up simulation log
