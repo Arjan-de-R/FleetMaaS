@@ -3,11 +3,12 @@ import numpy as np
 import math
 import random
 
-def sh_init_reg(regist):
+def sh_init_reg(params, regist):
     '''determine which platform a single-homing agents is registered with at start of simulation, possibly none'''
     primary_plf = np.zeros(len(regist), dtype=bool)
-    random_index = np.random.choice(len(regist))
-    primary_plf[random_index] = True
+    probabilities = params.platforms.get('start_reg_plf_share', np.ones(len(regist)) / len(regist))
+    regist_plf = np.random.choice(np.arange(len(params.platforms.service_types)), p=probabilities)
+    primary_plf[regist_plf] = True
     reg = primary_plf * regist
     
     return reg

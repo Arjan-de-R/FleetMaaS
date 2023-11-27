@@ -36,7 +36,8 @@ def start_regist_travs(inData, params):
 
     def array_with_pref_platform(params):
         array = np.full(len(params.platforms.service_types), False)
-        rand_plf = random.randint(0, len(params.platforms.service_types)-1) # preferred platform for single-homers
+        probabilities = params.platforms.get('start_reg_plf_share', np.ones(len(params.platforms.service_types)) / len(params.platforms.service_types))
+        rand_plf = np.random.choice(np.arange(len(params.platforms.service_types)), p=probabilities)
         array[rand_plf] = True
         return array
     
@@ -46,7 +47,7 @@ def start_regist_travs(inData, params):
     trav_df['registered'] = trav_df.apply(lambda row: np.full(len(params.platforms.service_types), True) * row.registered, axis=1)
     trav_df['registered'] = trav_df.apply(lambda row: row.registered if row.multihoming else row.registered * array_with_pref_platform(params), axis=1)
     trav_df['expected_wait'] = trav_df.apply(lambda row: zero_to_nan(row.registered * np.ones(len(inData.platforms.index))) * params.evol.travellers.inform.start_wait, axis=1)
-    trav_df['expected_ivt'] = trav_df.apply(lambda row: zero_to_nan(row.registered * row.ttrav), axis=1)
+    trav_df['expected_ivt'] = trav_df.apply(lambda row: zero_to_nan(row.registered * (1 + (np.array(params.platforms.service_types) == 'pool') * params.evol.travellers.inform.get('start_pool_detour', 0)) * row.ttrav), axis=1)
     km_fare = inData.platforms.fare.values
     trav_df['expected_km_fare'] = trav_df.apply(lambda row: zero_to_nan(row.registered * km_fare.mean()) if row.multihoming else zero_to_nan(row.registered * km_fare), axis=1)
     trav_df = trav_df.drop(columns=['ttrav'])
