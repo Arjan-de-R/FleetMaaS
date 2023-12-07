@@ -78,6 +78,10 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
             
         aggr_kpis = pd.concat([aggr_kpis, plf_kpis])
     
+    # Convert object columns to float if possible
+    object_cols = aggr_kpis.select_dtypes(include=['object']).columns
+    aggr_kpis[object_cols] = aggr_kpis[object_cols].apply(pd.to_numeric, errors='coerce')
+    
     if not aggr_kpis.empty: # there is at least a single driver
         aggr_kpis = aggr_kpis.groupby('driver_id').sum()
         veh_exp = pd.DataFrame(index = aggr_kpis.index)
