@@ -9,20 +9,23 @@ import pandas as pd
 import numpy as np
 import json
 import matplotlib.pyplot as plt
-from utils import create_d2d_df_list, create_attr_df_list, determine_req_repl_indicator, contains_item_from_list
+from utils import create_d2d_df_list, create_attr_df_list, determine_req_repl_indicator, contains_item_from_list, time_string_to_seconds
 import itertools
 import pickle
 
 ### ---------------------- INPUT -----------------------###
 
 # Which scenarios?
-var_dict = {'cmpt_type': ['sp']}  # assumes full enumeration
+# var_dict = {'cmpt_type': ['s','p','ss','pp','sp']}  # assumes full enumeration
+var_dict = {'cmpt_type': ['ss'], 'dem_mh_share': [0.5, 1], 'sup_mh_share': [0]}  # assumes full enumeration
+# var_dict = {'cmpt_type': ['sp'], 'start_reg_plf_share': ['0.1 0.9', '0.3 0.7', '0.7 0.3', '0.9 0.1']}  # assumes full enumeration
+# ref_value = {'name': 'num_signals', 'val': 50}
 
 # Required parameter values for statistical significance of equilibria
 conv_signif = 0.05
-conv_max_error = 0.02
-conv_steady_days = 5 # Note: needs to be same as in simulation!
-moving_average_days = 5 # Note: needs to be same as in simulation!
+conv_max_error = 0.05
+conv_steady_days = 25 # Note: needs to be same as in simulation!
+moving_average_days = 125 # Note: needs to be same as in simulation!
 
 # Results path
 res_path = os.path.join(path, 'results')
@@ -51,7 +54,12 @@ for scn_name in scenario_names:
 
     # List all files and find those corresponding to (different replications of) the specific scenario
     all_items = os.listdir(res_path)
-    folder_names = [item for item in all_items if os.path.isdir(os.path.join(res_path, item)) and item.startswith(scn_name + '-')] # Filter only the directories
+    # Check if scenario is the reference scenario, find the right file name
+    # if float(scn_dict[ref_value['name']]) != ref_value['val']:
+    folder_names = [item for item in all_items if os.path.isdir(os.path.join(res_path, item)) and '-'.join(item.split('-')[:-2]) == scn_name] # Filter only the directories
+    # else:
+        # folder_names = [item for item in all_items if os.path.isdir(os.path.join(res_path, item)) and item.startswith(scn_name.split("-")[0]+'-service_types')] # Filter only the directories
+    # folder_names = [item for item in all_items if os.path.isdir(os.path.join(res_path, item)) and item.startswith(scn_name + '-service_types')] # Filter only the directories
 
     # Open replication-independent (but scenario-specific) files - i.e. agent properties TODO: saving params to be used in analysis
     f = open(os.path.join(res_path, folder_names[0], '0_params.json'))
@@ -112,6 +120,9 @@ for scn_name in scenario_names:
     all_pax_attr = all_pax_attr.sort_index(level=['repl','pax_id'])
     conv_df = conv_df.sort_index(level=['repl','day'])
 
+    # Convert time string to seconds
+    pax_attr['ttrav'] = pax_attr.apply(lambda row: time_string_to_seconds(row.ttrav), axis=1)
+
     # Convert chosen_mode column to column per mode, with boolean values
     alt_mode_list = d2d_pax.chosen_mode.unique().tolist()
     alt_mode_list.remove('rs')
@@ -123,7 +134,7 @@ for scn_name in scenario_names:
     # For each indicator in d2d_pax, determine whether it is a 'count' or 'mean' indicator (in the population of agents)
     mean_indicators, count_indicators = [], []
     count_string_list = ["informed", "registered", "requests", "offer"] + alt_mode_list 
-    for col in d2d_pax.columns:
+    for col in np.concatenate((d2d_pax.columns.values, (np.array(['xp_detour_0', 'xp_detour_1', 'expected_detour_0', 'expected_detour_1']) if 'xp_ivt_1' in d2d_pax.columns else np.array(['xp_detour_0','expected_detour_0'])))):
         if contains_item_from_list(col, count_string_list): # if the indicator is a count indicator
             count_indicators.append(col) # add (possibly platform-specific) indicator to count_indicators list
         else:
@@ -135,6 +146,11 @@ for scn_name in scenario_names:
     mh_df_reset = pax_attr.reset_index()
     d2d_pax_reset = d2d_pax_reset.merge(mh_df_reset, on=common_columns, how='left')
     d2d_pax_reset.set_index(['repl', 'day', 'pax'], inplace=True)
+    d2d_pax_reset['xp_detour_0'] = (d2d_pax_reset.xp_ivt_0 / d2d_pax_reset.ttrav) - 1
+    d2d_pax_reset['expected_detour_0'] = (d2d_pax_reset.expected_ivt_0 / d2d_pax_reset.ttrav) - 1
+    if 'xp_ivt_1' in d2d_pax_reset.columns:
+        d2d_pax_reset['xp_detour_1'] = (d2d_pax_reset.xp_ivt_1 / d2d_pax_reset.ttrav) - 1
+        d2d_pax_reset['expected_detour_1'] = (d2d_pax_reset.expected_ivt_1 / d2d_pax_reset.ttrav) - 1
 
     # Add addititional indicators - separating multihomers and singlehomers
     grouped_result_count = d2d_pax_reset.groupby(['repl', 'day', 'multihoming'])[count_indicators].sum()
@@ -156,8 +172,9 @@ for scn_name in scenario_names:
     d2d_pax_stats['requests_sh_0'] = pivot_result['requests_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['registered_sh_1'] = pivot_result['registered_1'][False] if any_trav_sh and 'registered_1' in pivot_result.columns else np.nan
     d2d_pax_stats['requests_sh_1'] = pivot_result['requests_1'][False] if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['requests_sh_largest'] = d2d_pax_stats[['requests_sh_0','requests_sh_1']].max(axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['gets_offer_mh_0'] = pivot_result['gets_offer_0'][True] if any_trav_mh else np.nan
-    d2d_pax_stats['gets_offer_mh_1'] = pivot_result['gets_offer_1'][True] if any_trav_mh and 'gets_offer_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['gets_offer_mh_1'] = pivot_result['gets_offer_1'][True] if any_trav_mh and 'gets_offer_1' in pivot_result.columns  else np.nan
     d2d_pax_stats['gets_offer_sh_0'] = pivot_result['gets_offer_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['gets_offer_sh_1'] = pivot_result['gets_offer_1'][False] if any_trav_sh and 'gets_offer_1' in pivot_result.columns else np.nan
     d2d_pax_stats['accepts_offer_mh_0'] = pivot_result['accepts_offer_0'][True] if any_trav_mh else np.nan
@@ -168,21 +185,41 @@ for scn_name in scenario_names:
     d2d_pax_stats['exp_corr_wait_mh'] = pivot_result['corr_xp_wait_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['exp_corr_wait_sh_0'] = pivot_result['corr_xp_wait_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['exp_corr_wait_sh_1'] = pivot_result['corr_xp_wait_1'][False] if any_trav_sh and 'corr_xp_wait' in pivot_result.columns else np.nan
-    d2d_pax_stats['exp_ivt_mh'] = pivot_result['xp_ivt_0'][True] if any_trav_mh else np.nan
-    d2d_pax_stats['exp_ivt_sh_0'] = pivot_result['xp_ivt_0'][False] if any_trav_sh else np.nan
-    d2d_pax_stats['exp_ivt_sh_1'] = pivot_result['xp_ivt_1'][False] if any_trav_sh and 'xp_ivt_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_detour_mh'] = pivot_result['xp_detour_0'][True] if any_trav_mh else np.nan
+    d2d_pax_stats['exp_detour_sh_0'] = pivot_result['xp_detour_0'][False] if any_trav_sh else np.nan
+    d2d_pax_stats['exp_detour_sh_1'] = pivot_result['xp_detour_1'][False] if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['exp_km_fare_mh'] = pivot_result['xp_km_fare_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['exp_km_fare_sh_0'] = pivot_result['xp_km_fare_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['exp_km_fare_sh_1'] = pivot_result['xp_km_fare_1'][False] if any_trav_sh and 'xp_km_fare_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['perc_wait_mh'] = pivot_result['init_perc_wait_0'][True] if any_trav_mh else np.nan
-    d2d_pax_stats['perc_wait_sh_0'] = pivot_result['init_perc_wait_0'][False] if any_trav_sh else np.nan
-    d2d_pax_stats['perc_wait_sh_1'] = pivot_result['init_perc_wait_1'][False] if any_trav_sh and 'init_perc_wait_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['perc_ivt_mh'] = pivot_result['init_perc_ivt_0'][True] if any_trav_mh else np.nan
-    d2d_pax_stats['perc_ivt_sh_0'] = pivot_result['init_perc_ivt_0'][False] if any_trav_sh else np.nan
-    d2d_pax_stats['perc_ivt_sh_1'] = pivot_result['init_perc_ivt_1'][False] if any_trav_sh and 'init_perc_ivt_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['perc_km_fare_mh'] = pivot_result['init_perc_km_fare_0'][True] if any_trav_mh else np.nan
-    d2d_pax_stats['perc_km_fare_sh_0'] = pivot_result['init_perc_km_fare_0'][False] if any_trav_sh else np.nan
-    d2d_pax_stats['perc_km_fare_sh_1'] = pivot_result['init_perc_km_fare_1'][False] if any_trav_sh and 'init_perc_km_fare_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['perc_wait_mh'] = pivot_result['expected_wait_0'][True] if any_trav_mh else np.nan
+    d2d_pax_stats['perc_wait_sh_0'] = pivot_result['expected_wait_0'][False] if any_trav_sh else np.nan
+    d2d_pax_stats['perc_wait_sh_1'] = pivot_result['expected_wait_1'][False] if any_trav_sh and 'expected_wait_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['perc_detour_mh'] = pivot_result['expected_detour_0'][True] if any_trav_mh else np.nan
+    d2d_pax_stats['perc_detour_sh_0'] = pivot_result['expected_detour_0'][False] if any_trav_sh else np.nan
+    d2d_pax_stats['perc_detour_sh_1'] = pivot_result['expected_detour_1'][False] if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['perc_km_fare_mh'] = pivot_result['expected_km_fare_0'][True] if any_trav_mh else np.nan
+    d2d_pax_stats['perc_km_fare_sh_0'] = pivot_result['expected_km_fare_0'][False] if any_trav_sh else np.nan
+    d2d_pax_stats['perc_km_fare_sh_1'] = pivot_result['expected_km_fare_1'][False] if any_trav_sh and 'expected_km_fare_1' in pivot_result.columns else np.nan
+
+    # # Save results per replication for selected indicators
+    # select_df = d2d_pax_reset.copy()[['requests_0','gets_offer_0','xp_wait_0','xp_ivt_0','registered_0']] # km-fare and pooling detour (rel.)
+    # if 'requests_1' in d2d_pax_reset.columns:
+    #     cols_1 = d2d_pax_reset.copy()[['requests_1','gets_offer_1','xp_wait_1','xp_ivt_1','registered_1']]
+    #     select_df = pd.concat([select_df,cols_1],axis=1)
+    # else:
+    #     new_columns = {
+    #         'requests_1': np.nan,
+    #         'gets_offer_1': np.nan,
+    #         'xp_wait_1': np.nan,
+    #         'xp_ivt_1': np.nan,
+    #         'registered_1': np.nan
+    #     }
+    #     select_df = select_df.assign(**new_columns)
+    # select_df = select_df.groupby(level=['repl', 'day']).agg({'requests_0': 'sum', 'requests_1': 'sum', 'gets_offer_0': 'sum', 'gets_offer_1': 'sum', 
+    #                                                           'registered_0': 'sum', 'registered_1': 'sum', 
+    #                                                             'xp_wait_0': 'mean', 'xp_wait_1': 'mean', 'xp_ivt_0': 'mean', 'xp_ivt_1': 'mean'})
+    with open(os.path.join(aggr_scn_path, 'repl_dem_select.pkl'), 'wb') as f:
+        pickle.dump(d2d_pax_stats, f)
 
     # Created population-level statistics (aggregate over agents) for each replication - on the demand side
     mean_indicators, count_indicators = [], []
@@ -277,7 +314,7 @@ for scn_name in scenario_names:
         else:
             mean_indicators.append(col)
     mean_indicators.remove('multihoming')
-    # mean_indicators = ['exp_inc_0', 'exp_inc_1', 'init_perc_inc_0', 'init_perc_inc_1', 'relev_perc_util']
+    # mean_indicators = ['exp_inc_0', 'exp_inc_1', 'expected_income_0', 'expected_income_1', 'relev_perc_util']
     # count_indicators = ['informed', 'registered_0', 'registered_1', 'ptcp_0', 'ptcp_1','new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']
     grouped_result_count = d2d_veh_reset.groupby(['repl', 'day', 'multihoming'])[count_indicators].sum()
     grouped_result_mean = d2d_veh_reset.groupby(['repl', 'day', 'multihoming'])[mean_indicators].mean()
@@ -297,13 +334,31 @@ for scn_name in scenario_names:
     d2d_veh_stats['ptcp_mh'] = pivot_result['ptcp_0'][True] if any_driver_mh else np.nan
     d2d_veh_stats['ptcp_sh_0'] = pivot_result['ptcp_0'][False] if any_driver_sh else np.nan
     d2d_veh_stats['ptcp_sh_1'] = pivot_result['ptcp_1'][False] if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['ptcp_sh_largest'] = d2d_veh_stats[['ptcp_sh_0','ptcp_sh_1']].max(axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
     d2d_veh_stats['exp_inc_mh'] = pivot_result['exp_inc_0'][True] if any_driver_mh else np.nan
     d2d_veh_stats['exp_inc_sh_0'] = pivot_result['exp_inc_0'][False] if any_driver_sh else np.nan
-    d2d_veh_stats['exp_inc_sh_1'] = pivot_result['exp_inc_1'][False] if any_driver_sh and 'exp_inc_1' in pivot_result.columns else np.nan
-    d2d_veh_stats['perc_inc_mh'] = pivot_result['init_perc_inc_0'][True] if any_driver_mh else np.nan
-    d2d_veh_stats['perc_inc_sh_0'] = pivot_result['init_perc_inc_0'][False] if any_driver_sh else np.nan
-    d2d_veh_stats['perc_inc_sh_1'] = pivot_result['init_perc_inc_1'][False] if any_driver_sh and 'init_perc_inc_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['exp_inc_sh_1'] = pivot_result['exp_inc_1'][False] if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['perc_inc_mh'] = pivot_result['expected_income_0'][True] if any_driver_mh else np.nan
+    d2d_veh_stats['perc_inc_sh_0'] = pivot_result['expected_income_0'][False] if any_driver_sh else np.nan
+    d2d_veh_stats['perc_inc_sh_1'] = pivot_result['expected_income_1'][False] if any_driver_sh and 'expected_income_1' in pivot_result.columns else np.nan
     d2d_veh_stats[['new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']] = d2d_veh_reset.groupby(['repl', 'day'])[count_indicators].sum()[['new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']]
+
+    # Save selected results per replication for selected indicators (only single-homing)
+    # select_df = d2d_veh_reset.copy()[['ptcp_0','exp_inc_0', 'registered_0']]
+    # if 'ptcp_1' in d2d_veh_reset.columns:
+    #     cols_1 = d2d_veh_reset.copy()[['ptcp_1','exp_inc_1','registered_1']]
+    #     select_df = pd.concat([select_df,cols_1],axis=1)
+    # else:
+    #     new_columns = {
+    #         'ptcp_1': np.nan,
+    #         'exp_inc_1': np.nan,
+    #         'registered_1': np.nan
+    #     }
+    #     select_df = select_df.assign(**new_columns)
+    # select_df = select_df.groupby(level=['repl', 'day']).agg({'ptcp_0': 'sum', 'ptcp_1': 'sum', 'registered_0': 'sum', 'registered_1': 'sum', 
+    #                                                    'exp_inc_0': 'mean', 'exp_inc_1': 'mean'})
+    with open(os.path.join(aggr_scn_path, 'repl_sup_select.pkl'), 'wb') as f:
+        pickle.dump(d2d_veh_stats, f)
 
     # Create the pivot results - multihoming / registered
     mean_indicators, count_indicators = [], []
@@ -315,7 +370,7 @@ for scn_name in scenario_names:
         if contains_item_from_list(col, mean_string_list):
             mean_indicators.append(col)
     count_indicators.remove('registered_0')
-    # mean_indicators = ['exp_inc_0', 'exp_inc_1', 'init_perc_inc_0', 'init_perc_inc_1', 'relev_perc_util']
+    # mean_indicators = ['exp_inc_0', 'exp_inc_1', 'expected_income_0', 'expected_income_1', 'relev_perc_util']
     # count_indicators = ['informed', 'registered_1', 'ptcp_0', 'ptcp_1']
     grouped_result_count = d2d_veh_reset.groupby(['repl', 'day', 'registered_0', 'multihoming'])[count_indicators].sum()
     grouped_result_mean = d2d_veh_reset.groupby(['repl', 'day', 'registered_0', 'multihoming'])[mean_indicators].mean()
@@ -324,9 +379,9 @@ for scn_name in scenario_names:
                                             columns=['registered_0','multihoming'], 
                                             values=grouped_result.columns, 
                                             fill_value=0)
-    d2d_veh_stats['perc_inc_reg_0'] = pivot_result['init_perc_inc_0'][True][False] if any_driver_sh else np.nan
-    d2d_veh_stats['perc_inc_reg_mh'] = pivot_result['init_perc_inc_0'][True][True] if any_driver_mh else np.nan
-    d2d_veh_stats['perc_inc_notreg_mh'] = pivot_result['init_perc_inc_0'][False][True] if any_driver_mh else np.nan
+    d2d_veh_stats['perc_inc_reg_0'] = pivot_result['expected_income_0'][True][False] if any_driver_sh else np.nan
+    d2d_veh_stats['perc_inc_reg_mh'] = pivot_result['expected_income_0'][True][True] if any_driver_mh else np.nan
+    d2d_veh_stats['perc_inc_notreg_mh'] = pivot_result['expected_income_0'][False][True] if any_driver_mh else np.nan
 
     if 'registered_1' in d2d_veh_reset.columns: # if there are two platforms
         count_indicators = ['informed', 'registered_0', 'ptcp_0', 'ptcp_1']
@@ -337,7 +392,7 @@ for scn_name in scenario_names:
                                                 columns=['registered_1','multihoming'], 
                                                 values=grouped_result.columns, 
                                                 fill_value=0)
-        d2d_veh_stats['perc_inc_reg_1'] = pivot_result['init_perc_inc_1'][True][False]
+        d2d_veh_stats['perc_inc_reg_1'] = pivot_result['expected_income_1'][True][False] if any_driver_sh else np.nan
 
     mean_indicators = ['res_wage']
     grouped_result_mean = d2d_veh_reset.groupby(['repl', 'day', 'registered_0', 'multihoming'])[mean_indicators].mean()
@@ -376,7 +431,7 @@ for scn_name in scenario_names:
                                                 columns=['registered_1','multihoming'], 
                                                 values=grouped_result.columns, 
                                                 fill_value=0)
-        d2d_veh_stats['res_wage_reg_1'] = pivot_result['res_wage'][True][False]
+        d2d_veh_stats['res_wage_reg_1'] = pivot_result['res_wage'][True][False] if any_driver_sh else np.nan
 
         mean_indicators = ['res_wage']
         grouped_result_count = d2d_veh_reset.groupby(['repl', 'day', 'ptcp_1', 'multihoming'])[count_indicators].sum()
@@ -386,7 +441,7 @@ for scn_name in scenario_names:
                                                 columns=['ptcp_1','multihoming'], 
                                                 values=grouped_result.columns, 
                                                 fill_value=0)
-        d2d_veh_stats['res_wage_ptcp_1'] = pivot_result['res_wage'][True][False]
+        d2d_veh_stats['res_wage_ptcp_1'] = pivot_result['res_wage'][True][False] if any_driver_sh else np.nan
 
     # For each indicator in d2d_veh, determine whether it is a 'count' or 'mean' indicator (in the population of agents)
     mean_indicators, count_indicators = [], []
@@ -442,8 +497,13 @@ for scn_name in scenario_names:
     # For each perceived platform indicator, determine how many replications are needed based on values in an initial number of replications
     current_n_repl = len(d2d_pax.index.get_level_values('repl').unique()) # current number of replications to determine degrees of freedom
     req_repl_indicator = dict()
-    indicators = ['expected_ptcp_dem_mh','expected_ptcp_dem_sh_0','expected_ptcp_sup_mh','expected_ptcp_sup_sh_0','expected_ptcp_dem_sh_1','expected_ptcp_sup_sh_1']
+    if 'ptcp_dem_sh_1' in eql_df.columns.values:
+        indicators = ['ptcp_dem_mh','ptcp_dem_sh_0','ptcp_sup_mh','ptcp_sup_sh_0','ptcp_dem_sh_1','ptcp_sup_sh_1']
+    else:
+        indicators = ['ptcp_dem_mh','ptcp_dem_sh_0','ptcp_sup_mh','ptcp_sup_sh_0']
     for indic in indicators:
+        eql_df[indic] = pd.to_numeric(eql_df[indic], errors='coerce')
+        conv_df[indic] = pd.to_numeric(conv_df[indic], errors='coerce')
         avg_repl_perc_indicator = eql_df.groupby('repl')[indic].mean().mean()
         std_repl_perc_indicator = eql_df.groupby('repl')[indic].std().mean()
         req_repl_indicator[indic] = determine_req_repl_indicator(current_n_repl, avg_repl_perc_indicator, std_repl_perc_indicator, conv_signif, conv_max_error)
@@ -453,6 +513,7 @@ for scn_name in scenario_names:
         print('Success: Sufficient replications have been run for scenario {}: {} out of {} required'.format(scn_name, current_n_repl, req_n_repl))
     else:
         print('WARNING: Insufficient replications for scenario {}: {} out of {} required'.format(scn_name, current_n_repl, req_n_repl))
+        print('Required replications per indicator: {}'.format(req_repl_indicator))
     
     # Store required number of replications in dataframe
     req_repl_indicator['current_n_repl'] = current_n_repl
@@ -460,23 +521,23 @@ for scn_name in scenario_names:
     req_repl = req_repl.set_index(list(keys))
     
     # Plot the convergence indicators
-    sup_ptcp = ['expected_ptcp_sup_mh','expected_ptcp_sup_sh_0','expected_ptcp_sup_sh_1']
+    sup_ptcp = ['ptcp_sup_mh','ptcp_sup_sh_0','ptcp_sup_sh_1'] if 'ptcp_sup_sh_1' in eql_df.columns.values else ['ptcp_sup_mh','ptcp_sup_sh_0']
     aggregated = conv_df[sup_ptcp].groupby(['repl']).mean() #agg({col: 'mean'})
     aggregated.unstack('repl').plot(kind='line', figsize=(10, 6))
     plt.xlabel('Day')
     plt.ylabel('Drivers')
-    plt.title('Expected fleet size')
+    plt.title('Fleet size')
     plt.legend(title='repl')
-    plt.savefig(os.path.join(aggr_scn_path, 'perc_ptcp_sup.png'))
+    plt.savefig(os.path.join(aggr_scn_path, 'ptcp_sup.png'))
 
-    dem_ptcp = ['expected_ptcp_dem_mh','expected_ptcp_dem_sh_0','expected_ptcp_dem_sh_1']
+    dem_ptcp = ['ptcp_dem_mh','ptcp_dem_sh_0','ptcp_dem_sh_1'] if 'ptcp_dem_sh_1' in eql_df.columns.values else ['ptcp_dem_mh','ptcp_dem_sh_0']
     aggregated = conv_df[dem_ptcp].groupby(['repl']).mean()
     aggregated.unstack('repl').plot(kind='line', figsize=(10, 6))
     plt.xlabel('Day')
     plt.ylabel('Requests')
-    plt.title('Expected demand')
+    plt.title('Demand')
     plt.legend(title='repl')
-    plt.savefig(os.path.join(aggr_scn_path, 'perc_ptcp_dem.png'))
+    plt.savefig(os.path.join(aggr_scn_path, 'ptcp_dem.png'))
 
     # Save the aggregated dataframe for this scenario in pickle format
     with open(os.path.join(aggr_scn_path, 'aggr_dem.pkl'), 'wb') as f:
