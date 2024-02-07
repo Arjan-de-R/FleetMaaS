@@ -10,7 +10,7 @@ from MaaSSim.src_MaaSSim.utils import save_config, get_config
 from MaaSSim.src_MaaSSim.d2d_sim import *
 
 ### CHOOSE CONFIG FILE
-params = get_config(os.path.join('MaaSSim','data','config','FM_AMS_cmpt.json'))
+params = get_config(os.path.join('MaaSSim','data','config','AMS_TMC.json'))
 
 ### SERVICE TYPES
 params.platforms.service_types = ['solo', 'pool'] # list with 'solo' or 'pool' for each platform
@@ -24,9 +24,9 @@ params.platforms.service_types = ['solo', 'pool'] # list with 'solo' or 'pool' f
 # params.paths.PT_trips = os.path.join(MAASSIM_DIR,'data','demand','{}'.format(params.city.split(",")[0],'albatross','req_PT.csv')
 # params.study_name = 'competition_trb24'
 # params.paths.fleetpy_config = 'constant_config.csv'
-params.nP = 10000 # travellers
-params.nV = 200 # drivers
-params.nD = 100 # max. number of days
+params.nP = 1000 # travellers
+params.nV = 50 # drivers
+params.nD = 20 # max. number of days
 # params.simTime = 8 # hours
 ## Platform settings - platform 0
 # params.platforms.base_fare = 1.5 #euro
@@ -42,14 +42,14 @@ params.nD = 100 # max. number of days
 # params.platforms.comm_rate_1 = 0.25 #rate
 # params.platforms.max_rel_detour_1 = 40 # if pooling is not allowed, this is set to 0 (with non-zero additional boarding time preventing pooling for identical trip requests)
 ## Multi-homing behaviour
-params.dem_mh_share = 0.5 # share of travellers open to multi-homing
-params.sup_mh_share = 0.5 # share of drivers open to multi-homing
+# params.dem_mh_share = 0 # share of travellers open to multi-homing
+# params.sup_mh_share = 0 # share of drivers open to multi-homing
 # params.evol.drivers.particip.beta = 0.05
 # params.evol.travellers.inform.std_fact = 0.5
 # params.evol.drivers.inform.std_fact = 0.5
 # params.evol.drivers.kappa_comm = 0.5
 # params.evol.travellers.kappa_comm = 0.5
-params.evol.drivers.regist.samp = 0.5
+# params.evol.drivers.regist.samp = 1
 # params.evol.drivers.regist.min_days = 5
 # params.evol.travellers.mode_pref.min_wts_constant = -0.554 # used in uniform distribution
 # params.evol.travellers.mode_pref.ASC_car = -1.96
@@ -72,7 +72,7 @@ params.evol.drivers.regist.samp = 0.5
 # params.evol.travellers.regist.prob_start = 1
 # params.evol.drivers.inform.prob_start = 0.2
 # params.evol.drivers.regist.prob_start = 0.5
-params.evol.travellers.regist.samp = 0.5
+# params.evol.travellers.regist.samp = 1
 # params.evol.travellers.regist.min_days = 5
 # params.evol.drivers.start_perc_inc_avg_ratio = 1 # initial expected income - factor of average population reservation wage 
 
