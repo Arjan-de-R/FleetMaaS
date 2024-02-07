@@ -172,6 +172,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers = set_multihoming_travellers(inData.passengers, params)
     inData.passengers['informed'] = np.random.rand(len(inData.passengers)) < params.evol.travellers.inform.prob_start
     inData.passengers = start_regist_travs(inData, params)
+
+    # Set starting mobility credit balance
+    inData.passengers['tmc_balance'] = 0
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
