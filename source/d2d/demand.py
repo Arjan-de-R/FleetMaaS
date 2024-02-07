@@ -45,7 +45,8 @@ def start_regist_travs(inData, params):
     trav_df['ttrav'] = inData.requests.ttrav.dt.total_seconds()
     trav_df['registered'] = (np.random.rand(trav_df.shape[0]) < prob_reg_start) * trav_df.informed
     trav_df['registered'] = trav_df.apply(lambda row: np.full(len(params.platforms.service_types), True) * row.registered, axis=1)
-    trav_df['registered'] = trav_df.apply(lambda row: row.registered if row.multihoming else row.registered * array_with_pref_platform(params), axis=1)
+    if not params.evol.travellers.regist.auto:
+        trav_df['registered'] = trav_df.apply(lambda row: row.registered if row.multihoming else row.registered * array_with_pref_platform(params), axis=1)
     trav_df['expected_wait'] = trav_df.apply(lambda row: zero_to_nan(row.registered * np.ones(len(inData.platforms.index))) * params.evol.travellers.inform.start_wait, axis=1)
     trav_df['expected_ivt'] = trav_df.apply(lambda row: zero_to_nan(row.registered * (1 + (np.array(params.platforms.service_types) == 'pool') * params.evol.travellers.inform.get('start_pool_detour', 0)) * row.ttrav), axis=1)
     km_fare = inData.platforms.fare.values
