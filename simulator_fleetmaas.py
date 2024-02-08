@@ -265,7 +265,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             del sim.res[day]
         else: # run FleetPy
             # Pre-day work choice
-            inData.vehicles = work_preday(inData.vehicles, params)
+            if not params.evol.drivers.particip.auto:
+                inData.vehicles = work_preday(inData.vehicles, params)
+            else:
+                inData.vehicles['ptcp'] = inData.vehicles['registered'].copy()
 
             # Determine which platform(s) agents can use - using right FleetPy coding
             df_veh = inData.vehicles.copy()
