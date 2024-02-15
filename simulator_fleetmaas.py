@@ -125,12 +125,14 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     if params.paths.get('requests', False):
         inData = read_requests_csv(inData, params.paths.requests) # read request file
-        if params.nP > inData.requests.shape[0]:
-            raise Exception("Number of travellers is larger than demand dataset")
         if params.paths.get('PT_trips',False):
             pt_trips = load_OTP_result(params) # load output of OpenTripPlanner queries for the preprocessed requests and add resulting PT attributes to inData.requests
             inData.requests = pd.concat([inData.requests, pt_trips], axis=1)
             del pt_trips
+        inData.requests = inData.requests[inData.requests['origin'].isin(inData.G.nodes) & inData.requests['destination'].isin(inData.G.nodes)].reset_index(drop=True) # Keep only req's with origin and destination in the network
+        inData.requests.index.name = 'pax_id'
+        if params.nP > inData.requests.shape[0]:
+            raise Exception("Number of travellers is larger than demand dataset")
         inData = sample_from_database(inData, params)  # sample nP and create inData.passengers
     else:
         # Generate requests - either based on a distribution or taken from Albatross - and corresponding passenger data
