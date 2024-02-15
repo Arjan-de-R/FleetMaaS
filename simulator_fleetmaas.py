@@ -34,6 +34,7 @@ from MaaSSim.src_MaaSSim.d2d_demand import *
 from MaaSSim.src_MaaSSim.d2d_supply import *
 from MaaSSim.src_MaaSSim.decisions import dummy_False
 from source.d2d.reproduce_MS_simulator import repl_sim_object
+from tmc.utils import *
 import zipfile
 import json
 import geopandas
@@ -160,6 +161,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     # Generate mode preferences
     inData.passengers = prefs_travs(inData, params)
 
+    # Determine required mobility credits per mode for each trip request
+    if params.tmc:
+        inData.requests = trip_credit_cost(inData, params)
+
     all_req = inData.requests.copy()
     all_pax = mode_filter(inData, params)
     inData.passengers = all_pax[all_pax.mode_choice == "day-to-day"]
@@ -248,6 +253,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_choice']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
     del all_pax, all_req, all_pax_df
 
+    # Starting credit price
+    credit_price = 1
+
     # Initialise convergence
     d2d_conv = pd.DataFrame()
 
@@ -255,7 +263,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     for day in range(params.get('nD', 1)):  # run iterations
 
         #----- Pre-day -----#
-        inData.passengers = mode_preday(inData, params) # mode choice
+        if params.evol.travellers.plf_choice == 'preday':
+            inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price)
+        else:
+            inData.passengers = mode_preday(inData, params) # mode choice
 
         #----- Within-day simulator -----#
         if not params.paths.get('fleetpy_config', False): # run MaaSSim
@@ -276,8 +287,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             df_veh['ptcp_plf_index_string'] = df_veh.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.ptcp_plf_index, flags=['zerosize_ok'])), axis=1)
             inData.vehicles.platform = df_veh['ptcp_plf_index_string']
             df_pax = inData.passengers.copy()
-            df_pax['chosen_plf_index'] = df_pax.apply(lambda row: np.where((row.mode_day == 'rs') * row.registered)[0], axis=1)
-            df_pax['chosen_plf_index_string'] = df_pax.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.chosen_plf_index, flags=['zerosize_ok'])), axis=1)
+            if params.evol.travellers.plf_choice == 'preday':
+                df_pax['chosen_plf_index_string'] = df_pax.apply(lambda row: row.mode_day.split("_")[-1] + "" if row.mode_day.startswith('rs_') else "", axis=1)
+            else:
+                df_pax['chosen_plf_index'] = df_pax.apply(lambda row: np.where((row.mode_day == 'rs') * row.registered)[0], axis=1)
+                df_pax['chosen_plf_index_string'] = df_pax.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.chosen_plf_index, flags=['zerosize_ok'])), axis=1)
             inData.passengers.platforms = df_pax.chosen_plf_index_string
 
             # Generate input csv's for FleetPy
