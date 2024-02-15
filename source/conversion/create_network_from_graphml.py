@@ -3,6 +3,7 @@ import os
 import networkx as nx
 from shapely.geometry import Point, LineString
 import geopandas as gpd
+import math
 
 dev_p = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.append(dev_p)
@@ -72,12 +73,17 @@ def create_network_from_graphml(graphml_file, network_name, params):
                     speed = 100
                 elif graph.edges[edge]["highway"] in ["trunk_link", "trunk"]:
                     speed = 80
+                elif graph.edges[edge]["highway"] == "busway":
+                    speed = 0
                 else:
                     raise KeyError
             speed = float(speed) * params.speeds.get('congestion_factor', 1)
         else:
             speed = params.speeds.get('bike', 4.166666) * 3.6
-        travel_time = float(length)/float(speed)*3.6
+        try:
+            travel_time = float(length)/float(speed)*3.6
+        except ZeroDivisionError:
+            travel_time = math.inf
         
         if graph.edges[edge].get("geometry"):
             geo = graph.edges[edge].get("geometry")
