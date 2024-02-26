@@ -181,7 +181,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers = start_regist_travs(inData, params)
 
     # Set starting mobility credit balance
-    inData.passengers['tmc_balance'] = 0
+    inData.passengers['tmc_balance'] = 100
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
@@ -267,6 +267,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         #----- Pre-day -----#
         if params.evol.travellers.plf_choice == 'preday':
             inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price)
+            if params.tmc:
+                credit_deduction = pd.concat([inData.passengers, inData.requests], axis=1).apply(lambda row: deduct_credit_mode(row.mode_day, row.car_credit, row.bike_credit, row.pt_credit, row.rs_credit), axis=1)
+                inData.passengers.tmc_balance = inData.passengers.tmc_balance - credit_deduction
         else:
             inData.passengers = mode_preday(inData, params) # mode choice
 

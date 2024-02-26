@@ -21,3 +21,19 @@ def trip_credit_cost(inData, params):
     inData.requests['rs_credit'] = inData.requests.apply(lambda row: np.array([rs_plf_credit(row.dist, params.platforms.service_types[plat_id]) for plat_id in range(0,len(params.platforms.service_types))]), axis=1)
 
     return inData.requests
+
+
+def deduct_credit_mode(chosen_mode, car_credit, bike_credit, pt_credit, rs_credit):
+    '''Determine the number of credits that is deducted from a traveller's balance based on the chosen mode'''
+
+    if chosen_mode == 'car':
+        credit_cost = car_credit
+    elif chosen_mode == 'bike':
+        credit_cost = bike_credit
+    elif chosen_mode == 'pt':
+        credit_cost = pt_credit
+    else: # rs is chosen
+        plf_id = int(chosen_mode.split("_")[-1])
+        credit_cost = rs_credit[plf_id]
+
+    return credit_cost
