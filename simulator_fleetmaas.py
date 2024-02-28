@@ -348,32 +348,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))
         sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
 
-        ### Determine convergence
-        # Create new dataframe containing (experienced) participation values of all days
-        travs_summary['requests_mh'] = travs_summary.apply(lambda row: row.requests.sum() > 1, axis=1)
-        travs_summary['requests_sh_0'] = travs_summary.apply(lambda row: int(row['requests'][0]) * int(not row['requests_mh']), axis=1)
-        drivers_summary['ptcp_mh'] = drivers_summary.apply(lambda row: ((~row.out).sum() > 1), axis=1)
-        drivers_summary['ptcp_sh_0'] = drivers_summary.apply(lambda row: int(not row['out'][0]) * int(not row['ptcp_mh']), axis=1)
-        conv_indic = pd.DataFrame([{'ptcp_dem_mh': travs_summary['requests_mh'].sum(), 'ptcp_dem_sh_0': travs_summary['requests_sh_0'].sum(), 
-                                    'ptcp_sup_mh': drivers_summary['ptcp_mh'].sum(), 'ptcp_sup_sh_0': drivers_summary['ptcp_sh_0'].sum()}])
-        if inData.platforms.shape[0] > 1: # more than one platform
-            conv_indic['ptcp_dem_sh_1'] = travs_summary.apply(lambda row: int(row['requests'][1]) * int(not row['requests_mh']), axis=1).sum()
-            conv_indic['ptcp_sup_sh_1'] = drivers_summary.apply(lambda row: int(not row['out'][1]) * int(not row['ptcp_mh']), axis=1).sum()
-        for mode in ['bike', 'car', 'pt']:
-            conv_indic[mode] = travs_summary.chosen_mode.value_counts()[mode] if mode in travs_summary.chosen_mode.value_counts().index else 0
-        if params.tmc:
-            conv_indic['not_enough_credit'] = travs_summary.chosen_mode.value_counts()['not_enough_credit'] if 'not_enough_credit' in travs_summary.chosen_mode.value_counts().index else 0
-        d2d_conv = pd.concat([d2d_conv, conv_indic])
-        # Create a copy of the csv by adding the last row to the already existing csv
-        if day == 0: # include the headers on the first day
-            conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=True)
-        else:
-            conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=False)
-        
+        ### Determine and store day's key KPIs, and determine convergence
+        d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv)
         if determine_convergence(inData, d2d_conv, params, scn_name, day):
             break
-        
-        # Save random states
         save_random_states(result_path)
 
         del drivers_summary, travs_summary, dem_df, sup_df
