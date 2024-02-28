@@ -32,8 +32,10 @@ def deduct_credit_mode(chosen_mode, car_credit, bike_credit, pt_credit, rs_credi
         credit_cost = bike_credit
     elif chosen_mode == 'pt':
         credit_cost = pt_credit
-    else: # rs is chosen
+    elif chosen_mode.startswith("rs"):
         plf_id = int(chosen_mode.split("_")[-1])
         credit_cost = rs_credit[plf_id]
+    else: # not enough credit to travel
+        credit_cost = 0
 
     return credit_cost
