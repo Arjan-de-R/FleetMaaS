@@ -181,7 +181,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers = start_regist_travs(inData, params)
 
     # Set starting mobility credit balance
-    inData.passengers['tmc_balance'] = 100
+    inData.passengers['tmc_balance'] = 20
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
@@ -359,6 +359,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         if inData.platforms.shape[0] > 1: # more than one platform
             conv_indic['ptcp_dem_sh_1'] = travs_summary.apply(lambda row: int(row['requests'][1]) * int(not row['requests_mh']), axis=1).sum()
             conv_indic['ptcp_sup_sh_1'] = drivers_summary.apply(lambda row: int(not row['out'][1]) * int(not row['ptcp_mh']), axis=1).sum()
+        for mode in ['bike', 'car', 'pt']:
+            conv_indic[mode] = travs_summary.chosen_mode.value_counts()[mode] if mode in travs_summary.chosen_mode.value_counts().index else 0
+        if params.tmc:
+            conv_indic['not_enough_credit'] = travs_summary.chosen_mode.value_counts()['not_enough_credit'] if 'not_enough_credit' in travs_summary.chosen_mode.value_counts().index else 0
         d2d_conv = pd.concat([d2d_conv, conv_indic])
         # Create a copy of the csv by adding the last row to the already existing csv
         if day == 0: # include the headers on the first day
