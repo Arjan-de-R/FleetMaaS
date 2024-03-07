@@ -180,8 +180,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers['informed'] = np.random.rand(len(inData.passengers)) < params.evol.travellers.inform.prob_start
     inData.passengers = start_regist_travs(inData, params)
 
-    # Set starting mobility credit balance
-    inData.passengers['tmc_balance'] = 20
+    if params.tmc:
+        # Set starting mobility credit balance
+        inData.passengers['tmc_balance'] = params.tmc.get('starting_allocation', 100)
+        # Establish traveller's buy/sell actions depending on price and credit balance
+        credit_dem_sup = establish_buy_quantities(params)
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
