@@ -27,6 +27,8 @@ def save_market_shares(inData, params, result_path, day, travs_summary, drivers_
     d2d_conv = pd.concat([d2d_conv, conv_indic])
     # Create a copy of the csv by adding the last row to the already existing csv
     if day == 0: # include the headers on the first day
+        if os.path.exists(os.path.join(result_path,'5_conv-indicators.csv')):
+            os.remove(os.path.join(result_path,'5_conv-indicators.csv'))
         conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=True)
     else:
         conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=False)

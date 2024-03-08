@@ -181,10 +181,13 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers = start_regist_travs(inData, params)
 
     if params.tmc:
+        # Create dataframe to store evolution of credit price and transaction volumes
+
         # Set starting mobility credit balance
         inData.passengers['tmc_balance'] = params.tmc.get('starting_allocation', 100)
         # Establish traveller's buy/sell actions depending on price and credit balance
-        credit_dem_sup = establish_buy_quantities(params)
+        buy_table_dims = buy_table_dimensions(params)
+        credit_dem_sup = establish_buy_quantities(params, buy_table_dims)
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
@@ -259,7 +262,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     del all_pax, all_req, all_pax_df
 
     # Starting credit price
-    credit_price = 1
+    credit_price = 0
 
     # Initialise convergence
     d2d_conv = pd.DataFrame()
@@ -272,7 +275,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price)
             if params.tmc:
                 credit_deduction = pd.concat([inData.passengers, inData.requests], axis=1).apply(lambda row: deduct_credit_mode(row.mode_day, row.car_credit, row.bike_credit, row.pt_credit, row.rs_credit), axis=1)
-                inData.passengers.tmc_balance = inData.passengers.tmc_balance - credit_deduction
+                inData.passengers.tmc_balance = inData.passengers.tmc_balance - credit_deduction # TODO: get money back when denied service? maybe not. we also don't model denied service in PT
         else:
             inData.passengers = mode_preday(inData, params) # mode choice
 
@@ -346,6 +349,14 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.passengers.informed = res_inf_trav.informed
         inData = platform_regist_trav(inData, travs_summary, params=params)
 
+        # Credit trading
+        if params.tmc:
+            credit_price, satisfied_orders, denied_orders = trading(inData, credit_dem_sup, buy_table_dims)
+            # Update credit balance
+            inData.passengers = update_credit_balance(inData, satisfied_orders, denied_orders)
+            # Save trading market indicators
+            save_tmc_market_indicators(inData, result_path, day, credit_price, satisfied_orders, denied_orders)
+            
         # Store KPIs of day
         dem_df, sup_df = d2d_summary_day(inData, drivers_summary, travs_summary)
         dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))
