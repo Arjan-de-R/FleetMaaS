@@ -44,24 +44,27 @@ def deduct_credit_mode(chosen_mode, car_credit, bike_credit, pt_credit, rs_credi
 
 
 def establish_buy_quantities(params, value_dict):
-    '''Create database with buy/sell quantities depending on credit balance and price'''
+    '''Create database with buy/sell quantities depending on remaining number of days, credit balance and price'''
 
     # Fill the database with buy/sell values
     buy_quant_dict = {}
-    for balance in value_dict['balance']:
-        # Create numpy 2d-array with prices as rows and buy_values as columns
-        util_buy_price_quant = util_buy(params, balance, value_dict['price'], value_dict['quantity'])
-        max_indices = np.nanargmax(util_buy_price_quant, axis=1)
-        buy_quant_dict[balance] = value_dict['quantity'][max_indices]
+    for rem_days in value_dict['days']:
+        balance_dict = {}
+        for balance in value_dict['balance']:
+            # Create numpy 2d-array with prices as rows and buy_values as columns
+            util_buy_price_quant = util_buy(params, balance, value_dict['price'], value_dict['quantity'], rem_days)
+            max_indices = np.nanargmax(util_buy_price_quant, axis=1)
+            balance_dict[balance] = value_dict['quantity'][max_indices]
+        buy_quant_dict[rem_days] = balance_dict.copy()
 
     return buy_quant_dict
 
 
-def util_buy(params, balance, price, buy_quant):
+def util_buy(params, balance, price, buy_quant, rem_days):
     '''Determine utility associated with buying and selling, trading off financial gains/costs and utility of having credits'''
 
     util_cost = np.array([price]).T * buy_quant * params.tmc.get('beta_monetary', -1)
-    util_credit = np.sqrt(balance + buy_quant) - np.sqrt(balance)
+    util_credit = np.sqrt((balance + buy_quant) / rem_days) - np.sqrt(balance / rem_days)
     net_util_buy = util_credit + util_cost
 
     return net_util_buy
@@ -70,26 +73,34 @@ def util_buy(params, balance, price, buy_quant):
 def buy_table_dimensions(params):
     '''Determine which values are included in the table with quantities depending on price and credit balance'''
     min_price_step = params.tmc.price.get('step', 0.01)
+    min_balance_step = params.tmc.balance.get('step', 0.1)
     max_buy_quant = params.tmc.get('max_quant', 100)
 
     # Determine dimensions of database: balance quantities and credit price levels
-    balance_values = np.arange(0, params.tmc.max_balance+1)
+    balance_values = np.arange(0, params.tmc.max_balance + min_balance_step, min_balance_step)
     price_values = np.arange(params.tmc.price.get('min',0), params.tmc.price.get('max',10) + min_price_step, min_price_step)
     buy_values = np.arange(-max_buy_quant,max_buy_quant+1)
-    value_dict = {'balance': balance_values, 'price': price_values, 'quantity': buy_values}
+    remaining_day_values = np.arange(1,params.nD+1)
+    value_dict = {'balance': balance_values, 'price': price_values, 'quantity': buy_values, 'days': remaining_day_values}
 
     return value_dict
 
 
-def trading(inData, credit_dem_sup, value_dict):
+def trading(inData, credit_dem_sup, value_dict, remaining_days=1):
     '''Determine market price and how many credits are bought and sold by each individual (and rejected orders)'''
 
     today_net_buy_quant_dict = {}
     for pax in inData.passengers.index:
-        # Determine pax's credit balance and round down
-        credit_balance = int(inData.passengers.tmc_balance[pax])
-        # Find buy quantities corresponding to the credit balance
-        today_net_buy_quant_dict[pax] = credit_dem_sup[credit_balance]
+        # Determine pax's number of credits in balance per remaining day
+        credit_balance = inData.passengers.tmc_balance[pax]
+        if remaining_days == 0:
+            today_net_buy_quant_dict[pax] = np.zeros(len(value_dict['price']))
+        else:
+            # Find closest balance value in utility database
+            table_balance = value_dict['balance'][np.argmin(np.abs(value_dict['balance'] - credit_balance))]
+            # Find buy quantities corresponding to the credit balance (considering number of remaining days)
+            today_net_buy_quant_dict[pax] = credit_dem_sup[remaining_days][table_balance]
+
     # Aggregate individual buy/sell quantities to aggregated
     agg_net_buy_quant = np.sum([buy_array for buy_array in today_net_buy_quant_dict.values()], axis=0)
     # Determine credit price by finding minimum net (absolute) buy/sell offer

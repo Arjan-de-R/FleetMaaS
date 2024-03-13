@@ -181,8 +181,6 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers = start_regist_travs(inData, params)
 
     if params.tmc:
-        # Create dataframe to store evolution of credit price and transaction volumes
-
         # Set starting mobility credit balance
         inData.passengers['tmc_balance'] = params.tmc.get('starting_allocation', 100)
         # Establish traveller's buy/sell actions depending on price and credit balance
@@ -351,7 +349,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
         # Credit trading
         if params.tmc:
-            credit_price, satisfied_orders, denied_orders = trading(inData, credit_dem_sup, buy_table_dims)
+            credit_price, satisfied_orders, denied_orders = trading(inData, credit_dem_sup, buy_table_dims, remaining_days=params.nD-day-1)
             # Update credit balance
             inData.passengers = update_credit_balance(inData, satisfied_orders, denied_orders)
             # Save trading market indicators
