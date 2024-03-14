@@ -185,7 +185,6 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.passengers['tmc_balance'] = params.tmc.get('starting_allocation', 100)
         # Establish traveller's buy/sell actions depending on price and credit balance
         buy_table_dims = buy_table_dimensions(params)
-        credit_dem_sup = establish_buy_quantities(params, buy_table_dims)
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
@@ -349,7 +348,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
         # Credit trading
         if params.tmc:
-            credit_price, satisfied_orders, denied_orders = trading(inData, credit_dem_sup, buy_table_dims, remaining_days=params.nD-day-1)
+            remaining_days = params.nD - day - 1
+            inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(params, buy_table_dims, remaining_days, row.tmc_balance), axis=1)
+            credit_price, satisfied_orders, denied_orders = trading(inData, buy_table_dims)
             # Update credit balance
             inData.passengers = update_credit_balance(inData, satisfied_orders, denied_orders)
             # Save trading market indicators
@@ -362,8 +363,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
         ### Determine and store day's key KPIs, and determine convergence
         d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv)
-        if determine_convergence(inData, d2d_conv, params, scn_name, day):
-            break
+        if not params.tmc:
+            if determine_convergence(inData, d2d_conv, params, scn_name, day):
+                break
         save_random_states(result_path)
 
         del drivers_summary, travs_summary, dem_df, sup_df

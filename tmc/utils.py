@@ -60,12 +60,16 @@ def establish_buy_quantities(params, value_dict):
     return buy_quant_dict
 
 
-def util_buy(params, balance, price, buy_quant, rem_days):
+def util_buy(params, balance, price, buy_quant, rem_days, probabilistic=True):
     '''Determine utility associated with buying and selling, trading off financial gains/costs and utility of having credits'''
 
     util_cost = np.array([price]).T * buy_quant * params.tmc.get('beta_monetary', -1)
     util_credit = np.sqrt((balance + buy_quant) / rem_days) - np.sqrt(balance / rem_days)
     net_util_buy = util_credit + util_cost
+    if probabilistic:
+        std_dev_error_term = np.sqrt((np.pi**2) / 6)
+        error_terms = np.random.normal(loc=0, scale=std_dev_error_term, size=net_util_buy.shape[1])
+        net_util_buy = net_util_buy + error_terms
 
     return net_util_buy
 
@@ -86,20 +90,12 @@ def buy_table_dimensions(params):
     return value_dict
 
 
-def trading(inData, credit_dem_sup, value_dict, remaining_days=1):
+def trading(inData, value_dict):
     '''Determine market price and how many credits are bought and sold by each individual (and rejected orders)'''
 
     today_net_buy_quant_dict = {}
     for pax in inData.passengers.index:
-        # Determine pax's number of credits in balance per remaining day
-        credit_balance = inData.passengers.tmc_balance[pax]
-        if remaining_days == 0:
-            today_net_buy_quant_dict[pax] = np.zeros(len(value_dict['price']))
-        else:
-            # Find closest balance value in utility database
-            table_balance = value_dict['balance'][np.argmin(np.abs(value_dict['balance'] - credit_balance))]
-            # Find buy quantities corresponding to the credit balance (considering number of remaining days)
-            today_net_buy_quant_dict[pax] = credit_dem_sup[remaining_days][table_balance]
+        today_net_buy_quant_dict[pax] = inData.passengers.order_per_price.loc[pax].copy() # fill dict
 
     # Aggregate individual buy/sell quantities to aggregated
     agg_net_buy_quant = np.sum([buy_array for buy_array in today_net_buy_quant_dict.values()], axis=0)
@@ -174,3 +170,16 @@ def save_tmc_market_indicators(inData, result_path, day, credit_price, satisfied
         market_indic.to_csv(os.path.join(result_path,'6_tmc-indicators.csv'), mode='a', index=False, header=False)
 
     return 0
+
+
+def order_per_price(params, value_dict, rem_days, credit_balance):
+    '''Determine a traveller's buy/sell order for each possible credit price depending on their balance and time left to spend credits'''
+
+    if rem_days > 0:
+        util_buy_price_quant = util_buy(params, credit_balance, value_dict['price'], value_dict['quantity'], rem_days) # observed utility
+        max_indices = np.nanargmax(util_buy_price_quant, axis=1)
+        quantity = value_dict['quantity'][max_indices]
+    else:
+        quantity = np.zeros(len(value_dict['price']))
+
+    return quantity
