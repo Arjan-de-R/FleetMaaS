@@ -183,6 +183,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     if params.tmc:
         # Set starting mobility credit balance
         inData.passengers['tmc_balance'] = params.tmc.get('starting_allocation', 100)
+        inData.passengers['money_balance'] = 0
         # Establish traveller's buy/sell actions depending on price and credit balance
         buy_table_dims = buy_table_dimensions(params)
     
@@ -351,8 +352,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             remaining_days = params.nD - day - 1
             inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(params, buy_table_dims, remaining_days, row.tmc_balance), axis=1)
             credit_price, satisfied_orders, denied_orders = trading(inData, buy_table_dims)
-            # Update credit balance
-            inData.passengers = update_credit_balance(inData, satisfied_orders, denied_orders)
+            # Update credit and monetary balance
+            inData.passengers = update_balances(inData, satisfied_orders, denied_orders, credit_price)
             # Save trading market indicators
             save_tmc_market_indicators(inData, result_path, day, credit_price, satisfied_orders, denied_orders)
             

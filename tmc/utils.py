@@ -150,11 +150,12 @@ def trading(inData, value_dict):
     return credit_price, satisfy_net_buy_quant, denied_orders
 
 
-def update_credit_balance(inData, satisfied_orders, denied_orders):
-    '''Update credit balance based on satisfied trading orders (buy and sell)'''
+def update_balances(inData, satisfied_orders, denied_orders, credit_price):
+    '''Update credit and monetary balance based on satisfied trading orders (buy and sell) and price'''
     inData.passengers['net_purchase'] = satisfied_orders.copy()
     inData.passengers['denied_order'] = denied_orders.copy()
     inData.passengers.tmc_balance = inData.passengers.tmc_balance + inData.passengers.net_purchase
+    inData.passengers.money_balance = inData.passengers.money_balance - inData.passengers.net_purchase * credit_price
 
     return inData.passengers
 
