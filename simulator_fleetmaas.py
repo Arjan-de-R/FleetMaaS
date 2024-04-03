@@ -327,9 +327,24 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             perc_demand = learn_demand(inData, params, zones, perc_demand)
 
         #----- Post-day -----#
+            
+        # Determine road congestion (in retrospect) --> travel time factor (for ride-hailing and private car)
+            ## First determine total vkt
+            result_dir = os.path.join(fleetpy_dir, 'studies', fleetpy_study_name, 'results', fp_run_id) # where are the results stored
+            wd_eval = pd.read_csv(os.path.join(result_dir,'standard_eval.csv'))
+            plf_0_dist = wd_eval[wd_eval['Unnamed: 0'] == 'total vkm']['MoD_0'].values[0] * 1000
+            plf_1_dist = wd_eval[wd_eval['Unnamed: 0'] == 'total vkm']['MoD_1'].values[0] * 1000
+            car_dist = ((inData.passengers.mode_day == 'car') * inData.requests.dist).sum()
+            total_vkt = plf_0_dist + plf_1_dist + car_dist
+            ## Determine delay factor
+            delay_factor = params.congestion.get('base_delay', 1) + total_vkt * params.congestion.get('rel_delay_factor', 0)
+
+        # Update experienced travel time for private car
+
+        ## Ridesourcing
         # Determine key KPIs
         drivers_summary = update_d2d_drivers(sim=sim, params=params)
-        travs_summary = update_d2d_travellers(sim=sim, params=params, pax=inData.passengers)
+        travs_summary = update_d2d_travellers(sim=sim, params=params, pax=inData.passengers, congestion_factor=delay_factor)
         
         # Update work experience of job seekers
         exp_df = update_work_exp(inData, drivers_summary)   # number of days work experience
@@ -363,7 +378,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
 
         ### Determine and store day's key KPIs, and determine convergence
-        d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv)
+        d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, delay_factor)
         if not params.tmc:
             if determine_convergence(inData, d2d_conv, params, scn_name, day):
                 break

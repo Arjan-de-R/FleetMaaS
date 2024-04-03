@@ -9,7 +9,7 @@ def zero_to_nan(indicator):
     return indicator
 
 
-def save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv):
+def save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, delay_factor):
     '''Create new dataframe containing (experienced) participation values of all days (and potentially market shares of alternative modes)'''
     travs_summary['requests_mh'] = travs_summary.apply(lambda row: row.requests.sum() > 1, axis=1)
     travs_summary['requests_sh_0'] = travs_summary.apply(lambda row: int(row['requests'][0]) * int(not row['requests_mh']), axis=1)
@@ -24,6 +24,7 @@ def save_market_shares(inData, params, result_path, day, travs_summary, drivers_
         conv_indic[mode] = travs_summary.chosen_mode.value_counts()[mode] if mode in travs_summary.chosen_mode.value_counts().index else 0
     if params.tmc:
         conv_indic['not_enough_credit'] = travs_summary.chosen_mode.value_counts()['not_enough_credit'] if 'not_enough_credit' in travs_summary.chosen_mode.value_counts().index else 0
+    conv_indic['congestion_factor'] = delay_factor
     d2d_conv = pd.concat([d2d_conv, conv_indic])
     # Create a copy of the csv by adding the last row to the already existing csv
     if day == 0: # include the headers on the first day
