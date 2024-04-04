@@ -184,6 +184,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Set starting mobility credit balance
         inData.passengers['tmc_balance'] = params.tmc.get('starting_allocation', 100)
         inData.passengers['money_balance'] = 0
+        inData.passengers['tot_credit_bought'] = 0
+        inData.passengers['tot_credit_sold'] = 0
         # Establish traveller's buy/sell actions depending on price and credit balance
         buy_table_dims = buy_table_dimensions(params)
     

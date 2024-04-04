@@ -155,6 +155,8 @@ def update_balances(inData, satisfied_orders, denied_orders, credit_price):
     inData.passengers['net_purchase'] = satisfied_orders.copy()
     inData.passengers['denied_order'] = denied_orders.copy()
     inData.passengers.tmc_balance = inData.passengers.tmc_balance + inData.passengers.net_purchase
+    inData.passengers.tot_credit_bought = inData.passengers.apply(lambda row: row.tot_credit_bought + max(0, row.net_purchase), axis=1) 
+    inData.passengers.tot_credit_sold = inData.passengers.apply(lambda row: row.tot_credit_sold + max(0, -row.net_purchase), axis=1) 
     inData.passengers.money_balance = inData.passengers.money_balance - inData.passengers.net_purchase * credit_price
 
     return inData.passengers
