@@ -262,6 +262,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     # Starting credit price
     credit_price = 0
 
+    # Starting perception of congestion
+    perc_congest_factor = params.congestion.get('start_perc', 1)
+
     # Initialise convergence
     d2d_conv = pd.DataFrame()
 
@@ -270,7 +273,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
         #----- Pre-day -----#
         if params.evol.travellers.plf_choice == 'preday':
-            inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price)
+            inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor)
             if params.tmc:
                 credit_deduction = pd.concat([inData.passengers, inData.requests], axis=1).apply(lambda row: deduct_credit_mode(row.mode_day, row.car_credit, row.bike_credit, row.pt_credit, row.rs_credit), axis=1)
                 inData.passengers.tmc_balance = inData.passengers.tmc_balance - credit_deduction # TODO: get money back when denied service? maybe not. we also don't model denied service in PT
@@ -337,14 +340,14 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             car_dist = ((inData.passengers.mode_day == 'car') * inData.requests.dist).sum()
             total_vkt = plf_0_dist + plf_1_dist + car_dist
             ## Determine delay factor
-            delay_factor = params.congestion.get('base_delay', 1) + total_vkt * params.congestion.get('rel_delay_factor', 0)
-
-        # Update experienced travel time for private car
+            day_congest_factor = params.congestion.get('base_delay', 1) + total_vkt * params.congestion.get('rel_delay_factor', 4 / (params.nP * 5000))
+            ## Determine expected delay factor (weighing past experiences)
+            perc_congest_factor = params.congestion.get('weight_last_exp', 0.2) * day_congest_factor + (1 - params.congestion.get('weight_last_exp', 0.2)) * perc_congest_factor
 
         ## Ridesourcing
         # Determine key KPIs
         drivers_summary = update_d2d_drivers(sim=sim, params=params)
-        travs_summary = update_d2d_travellers(sim=sim, params=params, pax=inData.passengers, congestion_factor=delay_factor)
+        travs_summary = update_d2d_travellers(sim=sim, params=params, pax=inData.passengers)
         
         # Update work experience of job seekers
         exp_df = update_work_exp(inData, drivers_summary)   # number of days work experience
@@ -378,7 +381,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
 
         ### Determine and store day's key KPIs, and determine convergence
-        d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, delay_factor)
+        d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, day_congest_factor, perc_congest_factor)
         if not params.tmc:
             if determine_convergence(inData, d2d_conv, params, scn_name, day):
                 break
