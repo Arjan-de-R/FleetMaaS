@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
 import os
+import networkx as nx
+from FleetPy.src.misc.globals import *
+from FleetPy.src.routing.NetworkTTMatrix import NetworkTTMatrix
 
 def trip_credit_cost(inData, params):
     '''Determine credit cost for each mode for travellers' trip itineraries'''
@@ -186,3 +189,47 @@ def order_per_price(params, value_dict, rem_days, credit_balance):
         quantity = np.zeros(len(value_dict['price']))
 
     return quantity
+
+
+def shortest_path_through_area(nw, osm_to_fp_id, nodes_in_area, o_id, d_id):
+    "determine if shortest path (in FleetPy) between two nodes (o_id, d_id) passes through pre-defined area (list of nodes), returns Boolean"
+    fp_to_osm_id = {v: int(k) for k, v in osm_to_fp_id.items()}
+    sp_passes_through_area = False
+    o_pos = (osm_to_fp_id[str(o_id)], None, None)
+    d_pos = (osm_to_fp_id[str(d_id)], None, None)
+    od_node_list = nw.return_best_route_1to1(o_pos, d_pos)
+    for node_id in od_node_list:
+        osm_id = fp_to_osm_id[node_id]
+        if osm_id in nodes_in_area:
+            sp_passes_through_area = True
+            break
+
+    return sp_passes_through_area
+
+def prep_fp_shortest_paths(params):
+    '''prepare shortest path generator in FleetPy for determining whether requests traverse certain area'''
+    osm_to_fp_id = convert_fpid_to_osmid(params)
+    nw = init_networktt_fp_class(params)
+
+    return nw, osm_to_fp_id
+
+
+def convert_fpid_to_osmid(params):
+    '''convert fleetpy node id's to osm id's'''
+    graphml_file = params.paths.G
+    graph = nx.read_graphml(graphml_file)
+    osm_to_fp_id = {}
+    c_id = 0
+    for node in graph.nodes:
+        osm_to_fp_id[graph.nodes[node]["osmid"]] = c_id
+        c_id += 1
+    
+    return osm_to_fp_id
+
+
+def init_networktt_fp_class(params):
+    network_name = params.city.split(",")[0]
+    network_dir = os.path.join("FleetPy", "data", "networks", network_name)
+    nw = NetworkTTMatrix(network_dir)
+
+    return nw

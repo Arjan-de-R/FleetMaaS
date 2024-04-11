@@ -52,10 +52,10 @@ def single_pararun(one_slice, *args):
         stamp[key] = val
         _params = return_scn_params(params, key, val)
 
-    scn_name = ''
+    scn_name = '{}-'.format(params.get('dem_mgmt', 'None'))
     if params.platforms.service_types:
         cmpt_type_string = "".join([item[0] for item in params.platforms.service_types])
-        scn_name = '-{}'.format(cmpt_type_string)
+        scn_name = '-{}-{}'.format(params.get('dem_mgmt', 'None'), cmpt_type_string)
     for key, value in stamp.items():
         if key != 'service_types':
             scn_name += '-{}-{}'.format(key, value)
@@ -92,8 +92,6 @@ def simulate_parallel(config="MaaSSim/data/config/parallel.json", inData=None, p
 
     if len(inData.G) == 0:  # only if no graph in input
         inData = load_G(inData, params, stats=True, set_t=False)  # download graph for the 'params.city' and calc the skim matrices
-        if params.alt_modes.car.diff_parking:
-            inData = diff_parking(inData)  # determine which nodes are in center
 
     brute(func=single_pararun,
           ranges=slice_space(search_space, replications=params.parallel.get("nReplications",1)),
@@ -114,6 +112,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     :return: simulation object with results
     """
 
+    # Load path
+    if path is None:
+        path = os.getcwd()
+
     if inData is None:  # otherwise we use what is passed
         from MaaSSim.src_MaaSSim.data_structures import structures
         inData = structures.copy()  # fresh data
@@ -125,6 +127,13 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     if params.paths.get('requests', False):
         inData = read_requests_csv(inData, params.paths.requests) # read request file
+        if (params.dem_mgmt == 'cgp') and 'through_center' not in inData.requests.keys():
+            # Determine which trips pass through city centre, based on shortest path (only if not yet preprocessed)
+            nw, osm_to_fp_ids = prep_fp_shortest_paths(params)
+            centre_nodes = nodes_in_centre(params)
+            inData.requests['through_center'] = inData.requests.apply(lambda row: shortest_path_through_area(nw, osm_to_fp_ids, centre_nodes, row.origin, row.destination), axis=1)
+            inData.requests['pax_id'] = inData.requests.index
+            inData.requests.to_csv(os.path.join(path, 'source', 'MaaSSim', 'data', 'demand', 'reqs_center.csv'))
         if params.paths.get('PT_trips',False):
             pt_trips = load_OTP_result(params) # load output of OpenTripPlanner queries for the preprocessed requests and add resulting PT attributes to inData.requests
             inData.requests = pd.concat([inData.requests, pt_trips], axis=1)
@@ -143,6 +152,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     if len(inData.G) == 0:  # only if no graph in input
         inData = load_G(inData, params, stats=True)  # download graph for the 'params.city' and calc the skim matrices
+    if params.alt_modes.car.diff_parking:
+        inData, centre_nodes = prep_inData_nodes_centre(inData, params)  # determine which nodes are in center
 
     # Set random seeds used throughout the simulation
     np.random.seed(params.repl_id)
@@ -164,7 +175,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers = prefs_travs(inData, params)
 
     # Determine required mobility credits per mode for each trip request
-    if params.tmc:
+    if params.dem_mgmt == 'tmc':
         inData.requests = trip_credit_cost(inData, params)
 
     all_req = inData.requests.copy()
@@ -180,24 +191,24 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     inData.passengers['informed'] = np.random.rand(len(inData.passengers)) < params.evol.travellers.inform.prob_start
     inData.passengers = start_regist_travs(inData, params)
 
-    if params.tmc:
+    if params.dem_mgmt == 'tmc':
         # Set starting mobility credit balance
-        inData.passengers['tmc_balance'] = params.tmc.get('starting_allocation', 100)
+        credits_allocated = params.tmc.get('allocation', 50) 
+        inData.passengers['tmc_balance'] = credits_allocated
         inData.passengers['money_balance'] = 0
         inData.passengers['tot_credit_bought'] = 0
         inData.passengers['tot_credit_sold'] = 0
         # Establish traveller's buy/sell actions depending on price and credit balance
         buy_table_dims = buy_table_dimensions(params)
+        # Initialise remaining days in which credit can be spent
+        credit_validity = params.tmc.get('validity', 25)
+        remaining_days = credit_validity
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
     fixed_supply = generate_vehicles_d2d(inData, params)
     
     # correct 
     inData.vehicles = fixed_supply.copy()
-    
-    # Load path
-    if path is None:
-        path = os.getcwd()
 
     # Prepare schedule for shared rides and the within-day simulator
     inData = prep_shared_rides(inData, params.shareability)  # prepare schedules
@@ -267,6 +278,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     # Starting perception of congestion
     perc_congest_factor = params.congestion.get('start_perc', 1)
 
+    # Initialise license plate rationing
+    if params.dem_mgmt == 'lpr':
+        inData.passengers['odd_license'] = (np.random.randint(2, size = inData.passengers.shape[0]) == 1)
+
     # Initialise convergence
     d2d_conv = pd.DataFrame()
 
@@ -274,9 +289,24 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     for day in range(params.get('nD', 1)):  # run iterations
 
         #----- Pre-day -----#
+
+        # Credit trading
+        if params.dem_mgmt == 'tmc':
+            if remaining_days == 0: # new credits are assigned
+                inData.passengers['tmc_balance'] = credits_allocated
+                remaining_days = credit_validity
+            inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(params, buy_table_dims, remaining_days, row.tmc_balance), axis=1)
+            credit_price, satisfied_orders, denied_orders = trading(inData, buy_table_dims)
+            # Update credit and monetary balance
+            inData.passengers = update_balances(inData, satisfied_orders, denied_orders, credit_price)
+            # Save trading market indicators
+            save_tmc_market_indicators(inData, result_path, day, credit_price, satisfied_orders, denied_orders)
+            remaining_days -= 1
+
+        # Mode choice
         if params.evol.travellers.plf_choice == 'preday':
-            inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor)
-            if params.tmc:
+            inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
+            if params.dem_mgmt == 'tmc':
                 credit_deduction = pd.concat([inData.passengers, inData.requests], axis=1).apply(lambda row: deduct_credit_mode(row.mode_day, row.car_credit, row.bike_credit, row.pt_credit, row.rs_credit), axis=1)
                 inData.passengers.tmc_balance = inData.passengers.tmc_balance - credit_deduction # TODO: get money back when denied service? maybe not. we also don't model denied service in PT
         else:
@@ -366,16 +396,6 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         res_inf_trav = wom_trav(inData, travs_summary, params=params)
         inData.passengers.informed = res_inf_trav.informed
         inData = platform_regist_trav(inData, travs_summary, params=params)
-
-        # Credit trading
-        if params.tmc:
-            remaining_days = params.nD - day - 1
-            inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(params, buy_table_dims, remaining_days, row.tmc_balance), axis=1)
-            credit_price, satisfied_orders, denied_orders = trading(inData, buy_table_dims)
-            # Update credit and monetary balance
-            inData.passengers = update_balances(inData, satisfied_orders, denied_orders, credit_price)
-            # Save trading market indicators
-            save_tmc_market_indicators(inData, result_path, day, credit_price, satisfied_orders, denied_orders)
             
         # Store KPIs of day
         dem_df, sup_df = d2d_summary_day(inData, drivers_summary, travs_summary)
@@ -384,7 +404,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
         ### Determine and store day's key KPIs, and determine convergence
         d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, day_congest_factor, perc_congest_factor)
-        if not params.tmc:
+        if not params.dem_mgmt:
             if determine_convergence(inData, d2d_conv, params, scn_name, day):
                 break
         save_random_states(result_path)
