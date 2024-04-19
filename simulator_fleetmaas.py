@@ -172,17 +172,21 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             inData.platforms.loc[plat_id] = init_pooling_plf(params, plat_id)
 
     # Generate mode preferences
-    inData.passengers = prefs_travs(inData, params)
+    if params.dem_mgmt:
+        inData.passengers = prefs_travs_tmc(inData, params)
+    else:
+        inData.passengers = prefs_travs(inData, params)
 
     # Determine required mobility credits per mode for each trip request
     if params.dem_mgmt == 'tmc':
         inData.requests = trip_credit_cost(inData, params)
 
-    all_req = inData.requests.copy()
-    all_pax = mode_filter(inData, params)
-    inData.passengers = all_pax[all_pax.mode_choice == "day-to-day"]
-    inData.requests = inData.requests[inData.requests.index.isin(inData.passengers.index)]
-    inData.passengers.reset_index(drop=True, inplace=True)
+    if not params.get('dem_mgmt'):
+        all_req = inData.requests.copy()
+        all_pax = mode_filter(inData, params)
+        inData.passengers = all_pax[all_pax.mode_choice == "day-to-day"]
+        inData.requests = inData.requests[inData.requests.index.isin(inData.passengers.index)]
+        inData.passengers.reset_index(drop=True, inplace=True)
     inData.requests.reset_index(drop=True, inplace=True)
     inData.requests['pax_id'] = inData.requests.index
 
@@ -263,14 +267,16 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     df_req = inData.requests[['pax_id','origin','destination','treq','dist','ttrav']]
     if 'haver_dist' in inData.requests.columns:
         df_req['haver_dist'] = inData.requests['haver_dist']
-    df_pax = inData.passengers[['VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming']]
+    df_pax_cols = [x for x in ['VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming'] if x in inData.passengers.columns]
+    df_pax = inData.passengers[df_pax_cols]
     pd.concat([df_req, df_pax], axis=1).to_csv(os.path.join(result_path,'1_pax-properties.csv'))
     inData.vehicles[['pos', 'res_wage', 'multihoming']].to_csv(os.path.join(result_path,'2_driver-properties.csv'))
     inData.platforms.to_csv(os.path.join(result_path, '3_platform-properties.csv'))
-    all_pax_df = pd.concat([all_req, all_pax], axis=1)
-    all_pax_df = all_pax_df[all_pax_df.mode_choice != 'day-to-day']
-    all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_choice']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
-    del all_pax, all_req, all_pax_df
+    if not params.get('dem_mgmt'):
+        all_pax_df = pd.concat([all_req, all_pax], axis=1)
+        all_pax_df = all_pax_df[all_pax_df.mode_choice != 'day-to-day']
+        all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_choice']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
+        del all_pax, all_req, all_pax_df
 
     # Starting credit price
     credit_price = 0
@@ -305,7 +311,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
         # Mode choice
         if params.evol.travellers.plf_choice == 'preday':
-            inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
+            if params.dem_mgmt:
+                inData.passengers = mode_preday_plf_choice_tmc(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
+            else:
+                inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
             if params.dem_mgmt == 'tmc':
                 credit_deduction = pd.concat([inData.passengers, inData.requests], axis=1).apply(lambda row: deduct_credit_mode(row.mode_day, row.car_credit, row.bike_credit, row.pt_credit, row.rs_credit), axis=1)
                 inData.passengers.tmc_balance = inData.passengers.tmc_balance - credit_deduction # TODO: get money back when denied service? maybe not. we also don't model denied service in PT

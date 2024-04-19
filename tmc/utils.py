@@ -2,8 +2,10 @@ import numpy as np
 import pandas as pd
 import os
 import networkx as nx
+import math
 from FleetPy.src.misc.globals import *
 from FleetPy.src.routing.NetworkTTMatrix import NetworkTTMatrix
+from MaaSSim.src_MaaSSim.d2d_demand import mode_probs
 
 def trip_credit_cost(inData, params):
     '''Determine credit cost for each mode for travellers' trip itineraries'''
@@ -233,3 +235,220 @@ def init_networktt_fp_class(params):
     nw = NetworkTTMatrix(network_dir)
 
     return nw
+
+
+def util_alt_modes_tmc(params):
+    "determine utility of alternative modes for group of travellers"
+    prefs = params.evol.travellers.mode_pref
+
+    # Draw Value of Time and corresponding beta's for travellers
+    vot = np.random.lognormal(mean=prefs.ivt_mean_lognorm, sigma=prefs.ivt_sigma_lognorm, size=params.nP) * (-1) / prefs.beta_cost * 60  # VoT in euro/h
+
+    # Draw mode preferences (ASCs) for travellers
+    ASC_car = np.random.normal(prefs.ASC_car, prefs.ASC_car_sd, params.nP)
+    ASC_bike = np.random.normal(0, prefs.ASC_bike_sd, params.nP)
+
+    # PT alternative - if included in simulation
+    if params.paths.get('PT_trips',False):
+        ASC_pt = np.random.normal(prefs.ASC_pt, prefs.ASC_pt_sd, params.nP)
+    else:
+        ASC_pt = -np.inf
+
+    ASCs = pd.DataFrame({'bike': ASC_bike, 'car': ASC_car, 'pt': ASC_pt})
+    
+    return ASCs, vot
+
+
+def prefs_travs_tmc(inData, params):
+    "draw mode preferences for the group of travellers"
+    prefs = params.evol.travellers.mode_pref
+    passengers = inData.passengers
+
+    ASCs, vot = util_alt_modes_tmc(params)
+    passengers['ASC_bike'] = ASCs.bike
+    passengers['ASC_car'] = ASCs.car
+    passengers['ASC_pt'] = ASCs.pt
+
+    passengers['VoT'] = vot
+    
+    passengers['ASC_rs'] = np.random.normal(prefs.ASC_rs, prefs.ASC_rs_sd,len(inData.passengers))
+    passengers['ASC_pool'] = passengers.ASC_rs + np.random.uniform(prefs.min_wts_constant, 0, len(inData.passengers))
+
+    return passengers
+
+
+def mode_preday_plf_choice_tmc(inData, params, **kwargs):
+    "determine the mode at the start of a day for a pool of travellers (if they are single-homing yet possibly registered with more than 1 platform and still have to choose)"
+    requests = inData.requests
+    passengers = inData.passengers
+    prefs = params.evol.travellers.mode_pref
+    props = params.alt_modes
+    credit_price = kwargs.get('credit_price')
+    perc_congest_factor = kwargs.get('perc_congest_factor', 1)
+    mode_attr = {}
+    utils = {}
+
+    ## Establish attributes in mode choice for each mode
+    # Bike
+    mode_attr['bike'] = {}
+    mode_attr['bike']['gtt'] = requests.ttrav_bike.dt.total_seconds() * prefs.bike_multip
+    mode_attr['bike']['cost'] = 0
+    mode_attr['bike']['credits'] = requests.bike_credit if params.dem_mgmt == 'tmc' else 0
+    mode_attr['bike']['constant'] = passengers.ASC_bike
+    # Private car
+    mode_attr['car'] = {}
+    car_ivt = requests.ttrav.dt.total_seconds() * perc_congest_factor  # assumed same as RS (solo)
+    requests['car_park_cost'] = props.car.park_cost
+    if props.car.diff_parking:
+        requests['dest_center'] = requests.apply(lambda x: inData.nodes.center.loc[x.destination], axis=1)
+        requests.loc[requests.dest_center, 'car_park_cost'] = props.car.park_cost_center
+    mode_attr['car']['cost'] = props.car.km_cost * (requests.dist / 1000) + requests.car_park_cost
+    if params.dem_mgmt == 'cgp':
+        mode_attr['car']['cost'] = mode_attr['car']['cost'] + requests.through_center * params.zone_charge.get('car', 5)
+    mode_attr['car']['gtt'] = prefs.access_multip * props.car.access_time + car_ivt # generalised travel time
+    mode_attr['car']['constant'] = passengers.ASC_car
+    mode_attr['car']['credits'] = requests.car_credit if params.dem_mgmt == 'tmc' else 0
+    # Public transport (if included)
+    if params.paths.get('PT_trips',False):
+        mode_attr['pt'] = {}
+        pt_trans_pen = requests.transfers * prefs.transfer_pen
+        pt_ivt = requests.transitTime + pt_trans_pen
+        pt_wait = requests.waitingTime
+        pt_access = requests.walkDistance / params.speeds.walk
+        mode_attr['pt']['gtt'] = prefs.access_multip * pt_access + prefs.wait_multip * pt_wait + pt_ivt
+        mode_attr['pt']['cost'] = requests.PTfare
+        mode_attr['pt']['constant'] = passengers.ASC_pt
+        mode_attr['pt']['credits'] = requests.pt_credit if params.dem_mgmt == 'tmc' else 0
+    # Ride-hailing
+    df = passengers.copy()
+    mode_attr['rs'] = {}
+    if params.dem_mgmt == 'cgp':
+        congestion_charge = []
+        for plf in range(len(params.platforms.service_types)):
+            plf_charge = params.zone_charge.get('solo', 5) if params.platforms.service_types[plf] == 'solo' else params.zone_charge.get('pool', 0)
+            congestion_charge.append(plf_charge)
+        mode_attr['rs'] = rs_attr_tmc(inData, params, df.expected_wait * perc_congest_factor, df.expected_ivt * perc_congest_factor, df.expected_km_fare, inData.requests.dist, congestion_charge=congestion_charge)
+    else:
+        mode_attr['rs'] = rs_attr_tmc(inData, params, df.expected_wait * perc_congest_factor, df.expected_ivt * perc_congest_factor, df.expected_km_fare, inData.requests.dist)
+    mode_attr['rs']['credits'] = requests.rs_credit.copy() if params.dem_mgmt == 'tmc' else 0
+
+    # Determine utility of each mode
+    for mode in ['bike','car', 'pt', 'rs']:
+        utils[mode] = util_credit_time(params, mode_attr[mode], credit_price, df.tmc_balance, passengers.VoT)
+        utils[mode] = apply_insufficient_balance(utils[mode], mode_attr[mode]['credits'], df.tmc_balance, mode)
+        if mode == 'rs':
+            df['U_rs_plf'] = utils[mode]
+            df['U_rs_plf'] = df.apply(lambda row: row.U_rs_plf * unregist_to_nan(row.registered), axis=1) # only keep utility of platforms one is registered with
+            df['prob_plf'] = df.apply(lambda row: np.array([(np.exp(row.U_rs_plf[plf]) / np.exp(row.U_rs_plf).sum()) for plf in inData.platforms.index]), axis=1)
+            df[['U_rs','chosen_plf_index']] = df.apply(lambda row: util_rs_plf(row), axis=1, result_type='expand')
+            df['chosen_plf_index'] = df['chosen_plf_index'].astype(int)
+            utils[mode] = df['U_rs'].copy()
+        if mode == 'car' and params.dem_mgmt == 'lpr': # license plate rationing - cars allowed to drive on odd / even days
+            day = kwargs.get('day', None)
+            odd_day = ((day % 2) != 0)
+            allowed_to_drive = inData.passengers.odd_license if odd_day else ~inData.passengers.odd_license
+            utils[mode][~allowed_to_drive] = -math.inf
+    utils_df = pd.DataFrame.from_dict(utils)
+
+    ## ACTUAL MODE CHOICE
+    probabilities = mode_probs(utils_df)
+    cuml = probabilities.cumsum(axis=1)
+    draw = cuml.gt(np.random.random(len(passengers)),axis=0) * 1
+    probabilities['decis'] = draw.idxmax(axis="columns")
+    probabilities['pref_rs_plf'] = df.chosen_plf_index.copy()
+
+    df['U_bike'] = utils['bike']
+    df['U_car'] = utils['car']
+    df['U_pt'] = utils['pt']
+    if params.dem_mgmt == 'tmc':
+        # opt out if not enough credit to travel (for any mode)
+        probabilities['insuff_credit'] = df.apply(lambda row: (row.U_bike == -math.inf) and (row.U_car == -math.inf) and (row.U_pt == -math.inf) and (row.U_rs == -math.inf), axis=1)
+        probabilities['decis'] = probabilities.apply(lambda row: "not_enough_credit" if row.insuff_credit else row.decis, axis=1)
+
+    probabilities['decis'] = probabilities.apply(lambda row: row.decis + '_' + str(row.pref_rs_plf) if row.decis == 'rs' else row.decis, axis=1)
+    passengers['mode_day'] = probabilities.decis
+
+    passengers['U_bike'] = utils['bike']
+    passengers['U_car'] = utils['car']
+    passengers['U_pt'] = utils['pt']
+    
+    return passengers
+
+
+def rs_attr_tmc(inData, params, rs_wait, rs_ivt, rs_km_fare, rs_dist, trav_vot=False, trav_ASC=False, congestion_charge=None, through_center=False):
+    '''determine main ridesourcing attributes (time, costs, credits), either aggregated (if no trav_vot is provided) or for an individual traveller'''
+    passengers = inData.passengers
+    prefs = params.evol.travellers.mode_pref
+    
+    if not trav_vot: # determine utility for all passengers
+        rs_fare = np.ones(len(inData.passengers)) * params.platforms.base_fare + rs_km_fare * rs_dist / 1000
+        # TODO: different minimum fare for pooling provider (= (1-discount) * min_solo_fare)
+        # rs_fare[rs_fare < params.platforms.min_fare] += params.platforms.min_fare # min fare for solo ride
+        rs_fare =  rs_fare.apply(lambda arr: np.maximum(params.platforms.min_fare, arr))
+        if congestion_charge is not None:
+            df_cost = pd.DataFrame()
+            df_cost['rs_fare'] = rs_fare
+            df_cost['congest_charge'] = inData.requests.apply(lambda row: np.array(congestion_charge) * row.through_center, axis=1) 
+            rs_fare = df_cost.apply(lambda row: row.rs_fare + row.congest_charge, axis=1)
+        ASC_rs = passengers.ASC_rs
+    else:  # only for an individual traveller
+        rs_fare = params.platforms.base_fare + rs_km_fare * rs_dist / 1000
+        rs_fare = max(rs_fare, params.platforms.min_fare)
+        if congestion_charge is not None:
+            congestion_charge = np.array(congestion_charge) * through_center
+            rs_fare = rs_fare + congestion_charge
+        ASC_rs = trav_ASC
+
+    gtt = prefs.wait_multip * rs_wait + rs_ivt
+    attributes = {'gtt': gtt, 'cost': rs_fare, 'constant': ASC_rs}
+    
+    return attributes
+
+
+def util_credit_time(params, attr, credit_price, balance, VoT):
+    """determine mode utility depending on generalised travel time, normal costs, credit costs and balance"""
+    prefs = params.evol.travellers.mode_pref
+    mean_beta_time = math.exp(prefs.ivt_mean_lognorm + (prefs.ivt_sigma_lognorm**2)/2) # util/min
+    mean_beta_time_credit = math.exp(prefs.ivt_credit_mean_lognorm + (prefs.ivt_credit_sigma_lognorm**2)/2) # credit/min
+    beta_time = VoT * prefs.beta_cost / 3600  # util/s
+
+    # determine util/credit depending on credit price and balance
+    beta_credit = mean_beta_time / (mean_beta_time_credit + prefs.beta_credit_price * credit_price + prefs.beta_balance * balance)
+    # determine utility
+    mode_util = attr['constant'] + beta_credit * attr['credits'] + prefs.beta_cost * attr['cost'] + beta_time * attr['gtt']
+
+    return mode_util
+
+
+def apply_insufficient_balance(utils, credit_costs, balance, mode):
+    '''exclude mode (other than ridesourcing) from choice set if one has insufficient credits for this mode by setting utility to -inf'''
+    df = pd.DataFrame()
+    df['util'] = utils
+    df['credit_cost'] = credit_costs
+    df['balance'] = balance
+    df['suff_balance'] = df.apply(lambda row: row.credit_cost <= row.balance, axis=1)
+    if mode == 'rs':
+        df['util'] = df.apply(lambda row: util_suff_balance_rs(row), axis=1)
+    else:
+        df['util'] = df.apply(lambda row: row.util if row.suff_balance else -math.inf, axis=1)
+    return df['util']
+
+def util_suff_balance_rs(row):
+    '''return -inf for ridesourcing platforms for which user has insufficient credit'''
+    row.util[row.suff_balance == False] = -math.inf
+    return row.util
+
+def unregist_to_nan(arr):
+    arr[~arr] = np.nan
+    return arr
+
+def util_rs_plf(row):
+    '''determine utility of ridesourcing option based on specific platform'''
+    if not np.all(np.isneginf(row.U_rs_plf)):  # enough credit to use at least one of the platforms
+        chosen_plf_index = np.random.choice(len(row.prob_plf), p=np.nan_to_num(row.prob_plf))
+        U_rs = row.U_rs_plf[chosen_plf_index]
+    else: # not enough credit for ridesourcing
+        chosen_plf_index = 0
+        U_rs = -math.inf
+
+    return U_rs, int(chosen_plf_index)
