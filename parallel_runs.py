@@ -13,20 +13,19 @@ from MaaSSim.src_MaaSSim.d2d_sim import *
 params = get_config(os.path.join('MaaSSim','data','config','AMS_TMC.json'))
 
 ### SERVICE TYPES
-params.platforms.service_types = ['solo', 'pool'] # list with 'solo' or 'pool' for each platform
+params.platforms.service_types = ['solo', 'pool']  # list with 'solo' or 'pool' for each platform
 # params.platforms.start_reg_plf_share = [0.05, 0.95]
 # params.evol.travellers.inform.start_pool_detour = 0.25
 ### OPTIONAL: ADD / CHANGE MODEL PARAMETERS
 ## General settings
-# params.city = "Amsterdam, Netherlands"
+# params.city = "Amsterdam"
 # params.paths.albatross = os.path.join(MAASSIM_DIR,'data','albatross')
 # params.paths.requests = os.path.join(MAASSIM_DIR,'data','demand','{}'.format(params.city.split(",")[0],'albatross','preprocessed.csv')
 # params.paths.PT_trips = os.path.join(MAASSIM_DIR,'data','demand','{}'.format(params.city.split(",")[0],'albatross','req_PT.csv')
 # params.study_name = 'competition_trb24'
 # params.paths.fleetpy_config = 'constant_config.csv'
 params.nP = 1000 # travellers
-params.nV = 50 # drivers
-params.nD = 20 # max. number of days
+params.nV = 100 # drivers
 # params.simTime = 8 # hours
 ## Platform settings - platform 0
 # params.platforms.base_fare = 1.5 #euro
@@ -66,6 +65,16 @@ params.nD = 20 # max. number of days
 # params.alt_modes.pt.base_fare = 1.0
 # params.alt_modes.pt.km_fare = 0.2
 
+params.dem_mgmt = 'tmc' # 'None', 'tmc', 'lpr', 'cgp'
+# params.tmc.duration = 25  # days
+params.nD = 2 * params.tmc.duration # max. number of days
+params.tmc.allocated_credits_per_day = 5  # credit/day
+# params.tmc.beta_monetary = -0.2
+# params.tmc.max_balance = 1000
+# params.tmc.credit_mode.bike.base = 0.5
+# params.tmc.credit_mode.car.base = 20
+# params.tmc.credit_mode.pt.base = 20
+
 # ## Starting conditions
 # params.evol.travellers.inform.prob_start = 0.2
 # params.evol.travellers.regist = DotMap()
@@ -79,7 +88,7 @@ params.nD = 20 # max. number of days
 # params.evol.travellers.inform.beta = 4
 # params.evol.drivers.inform.beta = 1
 ## Start time
-params.t0 = pd.Timestamp(2023, 6, 13, 9)
+params.t0 = pd.Timestamp(2023, 6, 13, 16)
 
 # Convergence
 params.convergence.req_steady_days = 5 # X days in a row a change in perceived income of x-day moving average below the convergence factor
@@ -99,7 +108,7 @@ def sample_space():
     space.service_types = [['solo', 'pool']]
     # space.dem_mh_share = [0.5]
     # space.sup_mh_share = [0.5]
-    space.repl_id = [0]
+    space.repl_id = [5]
     return space
 
 def determine_n_threads(search_space):

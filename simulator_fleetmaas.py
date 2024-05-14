@@ -173,6 +173,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     # Generate mode preferences
     if params.dem_mgmt:
+        inData.requests = inData.requests.drop(['schedule_id'], axis=1)
         inData.passengers = prefs_travs_tmc(inData, params)
     else:
         inData.passengers = prefs_travs(inData, params)
@@ -197,7 +198,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     if params.dem_mgmt == 'tmc':
         # Set starting mobility credit balance
-        credits_allocated = params.tmc.get('allocation', 50) 
+        credits_allocated = params.tmc.get('allocated_credits_per_day', 10) * params.tmc.get('duration', 25)
         inData.passengers['tmc_balance'] = credits_allocated
         inData.passengers['money_balance'] = 0
         inData.passengers['tot_credit_bought'] = 0
@@ -205,7 +206,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Establish traveller's buy/sell actions depending on price and credit balance
         buy_table_dims = buy_table_dimensions(params)
         # Initialise remaining days in which credit can be spent
-        credit_validity = params.tmc.get('validity', 25)
+        credit_validity = params.tmc.get('duration', 25)
         remaining_days = credit_validity
     
     # Generate pool of job seekers, incl. setting multi-homing behaviour
@@ -214,8 +215,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     # correct 
     inData.vehicles = fixed_supply.copy()
 
-    # Prepare schedule for shared rides and the within-day simulator
-    inData = prep_shared_rides(inData, params.shareability)  # prepare schedules
+    # Prepare schedule for the within-day simulator
     if params.paths.get('fleetpy_config', False): # initialise FleetPy
         fleetpy_dir = os.path.join(path, 'FleetPy')
         fleetpy_study_name = params.get('study_name', 'MaaSSim_FleetPy')
@@ -312,7 +312,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Mode choice
         if params.evol.travellers.plf_choice == 'preday':
             if params.dem_mgmt:
-                inData.passengers = mode_preday_plf_choice_tmc(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
+                inData.passengers, inData.requests = mode_preday_plf_choice_tmc(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
             else:
                 inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
             if params.dem_mgmt == 'tmc':
@@ -373,15 +373,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         #----- Post-day -----#
             
         # Determine road congestion (in retrospect) --> travel time factor (for ride-hailing and private car)
-            ## First determine total vkt
-            result_dir = os.path.join(fleetpy_dir, 'studies', fleetpy_study_name, 'results', fp_run_id) # where are the results stored
-            wd_eval = pd.read_csv(os.path.join(result_dir,'standard_eval.csv'))
-            plf_0_dist = wd_eval[wd_eval['Unnamed: 0'] == 'total vkm']['MoD_0'].values[0] * 1000
-            plf_1_dist = wd_eval[wd_eval['Unnamed: 0'] == 'total vkm']['MoD_1'].values[0] * 1000
-            car_dist = ((inData.passengers.mode_day == 'car') * inData.requests.dist).sum()
-            total_vkt = plf_0_dist + plf_1_dist + car_dist
-            ## Determine delay factor
-            day_congest_factor = params.congestion.get('base_delay', 1) + total_vkt * params.congestion.get('rel_delay_factor', 4 / (params.nP * 5000))
+            ## First determine vkt and congestion factor
+            day_congest_factor, car_dist, plf_0_dist, plf_1_dist = determine_congestion(params, inData, network_name, fp_run_id, fleetpy_dir, fleetpy_study_name)
             ## Determine expected delay factor (weighing past experiences)
             perc_congest_factor = params.congestion.get('weight_last_exp', 0.2) * day_congest_factor + (1 - params.congestion.get('weight_last_exp', 0.2)) * perc_congest_factor
 
@@ -412,7 +405,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
 
         ### Determine and store day's key KPIs, and determine convergence
-        d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, day_congest_factor, perc_congest_factor)
+        congest_indic = {'xp_delay': day_congest_factor, 'perc_delay': perc_congest_factor, 'vkt_car': car_dist/1000, 'vkt_rs_0': plf_0_dist/1000, 'vkt_rs_1': plf_1_dist/1000}
+        d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, congest_indic)
         if not params.dem_mgmt:
             if determine_convergence(inData, d2d_conv, params, scn_name, day):
                 break

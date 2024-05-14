@@ -9,8 +9,8 @@ def zero_to_nan(indicator):
     return indicator
 
 
-def save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, delay_factor, perc_delay_factor):
-    '''Create new dataframe containing (experienced) participation values of all days (and potentially market shares of alternative modes)'''
+def save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, congest_indic):
+    '''Put out transportation system indicators for given day'''
     travs_summary['requests_mh'] = travs_summary.apply(lambda row: row.requests.sum() > 1, axis=1)
     travs_summary['requests_sh_0'] = travs_summary.apply(lambda row: int(row['requests'][0]) * int(not row['requests_mh']), axis=1)
     drivers_summary['ptcp_mh'] = drivers_summary.apply(lambda row: ((~row.out).sum() > 1), axis=1)
@@ -24,8 +24,11 @@ def save_market_shares(inData, params, result_path, day, travs_summary, drivers_
         conv_indic[mode] = travs_summary.chosen_mode.value_counts()[mode] if mode in travs_summary.chosen_mode.value_counts().index else 0
     if params.tmc:
         conv_indic['not_enough_credit'] = travs_summary.chosen_mode.value_counts()['not_enough_credit'] if 'not_enough_credit' in travs_summary.chosen_mode.value_counts().index else 0
-    conv_indic['xp_congestion_factor'] = delay_factor
-    conv_indic['perc_congest_factor'] = perc_delay_factor
+    for mode in ['bike', 'car', 'pt', 'rs_0', 'rs_1']:
+        conv_indic['paxkm_{}'.format(mode)] = travs_summary.loc[travs_summary.chosen_mode == mode].dist.sum() / 1000 if mode in travs_summary.chosen_mode.value_counts().index else 0
+    for indic in congest_indic:
+        conv_indic[indic] = congest_indic[indic]
+    conv_indic['total_perc_gtt'] = inData.requests.chosen_mode_perc_gtt.sum() / 3600
     d2d_conv = pd.concat([d2d_conv, conv_indic])
     # Create a copy of the csv by adding the last row to the already existing csv
     if day == 0: # include the headers on the first day

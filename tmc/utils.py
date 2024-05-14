@@ -65,12 +65,19 @@ def establish_buy_quantities(params, value_dict):
     return buy_quant_dict
 
 
-def util_buy(params, balance, price, buy_quant, rem_days, probabilistic=True):
+def util_buy(params, balance, price, buy_quant, rem_days, max_balance=np.inf, probabilistic=True):
     '''Determine utility associated with buying and selling, trading off financial gains/costs and utility of having credits'''
+    value_credit_in_balance = params.tmc.pref_trading.get('balance_util_percept', 1) # util/credit
+    excess_credit_scaling_param = params.tmc.pref_trading.get('excess_credit_param', 1)
 
-    util_cost = np.array([price]).T * buy_quant * params.tmc.get('beta_monetary', -1)
-    util_credit = np.sqrt((balance + buy_quant) / rem_days) - np.sqrt(balance / rem_days)
-    net_util_buy = util_credit + util_cost
+    # Determine utility of spent/earned money (opportunity cost) when buying/selling
+    util_cost = np.array([price]).T * buy_quant * params.tmc.pref_trading.get('beta_monetary', -1)
+    # Utility of having additional / fewer credits in balance than before
+    util_orig_balance = value_credit_in_balance * np.log(excess_credit_scaling_param * (balance / rem_days) + 1)
+    util_new_balance = value_credit_in_balance * np.log(excess_credit_scaling_param * ((balance + buy_quant) / rem_days) + 1)
+    util_balance_purchase = util_new_balance - util_orig_balance
+    util_balance_purchase[(-buy_quant > balance) | ((balance + buy_quant) > max_balance)] = np.nan # np.nan for infeasbile quantities (selling more than balance or buying over allowed balance)
+    net_util_buy = util_balance_purchase + util_cost
     if probabilistic:
         std_dev_error_term = np.sqrt((np.pi**2) / 6)
         error_terms = np.random.normal(loc=0, scale=std_dev_error_term, size=net_util_buy.shape[1])
@@ -83,13 +90,14 @@ def buy_table_dimensions(params):
     '''Determine which values are included in the table with quantities depending on price and credit balance'''
     min_price_step = params.tmc.price.get('step', 0.01)
     min_balance_step = params.tmc.balance.get('step', 0.1)
-    max_buy_quant = params.tmc.get('max_quant', 100)
+    max_balance = params.tmc.get('max_balance', params.tmc.max_balance_rel_to_init_allocation * params.tmc.allocated_credits_per_day * params.tmc.duration)
+    max_buy_quant = params.tmc.get('max_buy_day', max_balance)
 
     # Determine dimensions of database: balance quantities and credit price levels
-    balance_values = np.arange(0, params.tmc.max_balance + min_balance_step, min_balance_step)
-    price_values = np.arange(params.tmc.price.get('min',0), params.tmc.price.get('max',10) + min_price_step, min_price_step)
+    balance_values = np.arange(0, max_balance + min_balance_step, min_balance_step)
+    price_values = np.arange(params.tmc.price.get('min',0), params.tmc.price.get('max', 10) + min_price_step, min_price_step)
     buy_values = np.arange(-max_buy_quant,max_buy_quant+1)
-    remaining_day_values = np.arange(1,params.nD+1)
+    remaining_day_values = np.arange(1,params.tmc.duration+1)
     value_dict = {'balance': balance_values, 'price': price_values, 'quantity': buy_values, 'days': remaining_day_values}
 
     return value_dict
@@ -184,7 +192,8 @@ def order_per_price(params, value_dict, rem_days, credit_balance):
     '''Determine a traveller's buy/sell order for each possible credit price depending on their balance and time left to spend credits'''
 
     if rem_days > 0:
-        util_buy_price_quant = util_buy(params, credit_balance, value_dict['price'], value_dict['quantity'], rem_days) # observed utility
+        max_balance = np.max(value_dict['balance'])
+        util_buy_price_quant = util_buy(params, credit_balance, value_dict['price'], value_dict['quantity'], rem_days, max_balance=max_balance) # observed utility
         max_indices = np.nanargmax(util_buy_price_quant, axis=1)
         quantity = value_dict['quantity'][max_indices]
     else:
@@ -333,7 +342,8 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     mode_attr['rs']['credits'] = requests.rs_credit.copy() if params.dem_mgmt == 'tmc' else 0
 
     # Determine utility of each mode
-    for mode in ['bike','car', 'pt', 'rs']:
+    for mode in ['bike', 'car', 'pt', 'rs']:
+        df['tmc_balance'] = df.tmc_balance if params.dem_mgmt == 'tmc' else 0
         utils[mode] = util_credit_time(params, mode_attr[mode], credit_price, df.tmc_balance, passengers.VoT)
         utils[mode] = apply_insufficient_balance(utils[mode], mode_attr[mode]['credits'], df.tmc_balance, mode)
         if mode == 'rs':
@@ -372,7 +382,9 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     passengers['U_car'] = utils['car']
     passengers['U_pt'] = utils['pt']
     
-    return passengers
+    requests['chosen_mode_perc_gtt'] = return_gtt_chosen_mode(passengers, mode_attr)
+
+    return passengers, requests
 
 
 def rs_attr_tmc(inData, params, rs_wait, rs_ivt, rs_km_fare, rs_dist, trav_vot=False, trav_ASC=False, congestion_charge=None, through_center=False):
@@ -413,7 +425,7 @@ def util_credit_time(params, attr, credit_price, balance, VoT):
     beta_time = VoT * prefs.beta_cost / 3600  # util/s
 
     # determine util/credit depending on credit price and balance
-    beta_credit = mean_beta_time / (mean_beta_time_credit + prefs.beta_credit_price * credit_price + prefs.beta_balance * balance)
+    beta_credit = -mean_beta_time / (mean_beta_time_credit + prefs.beta_credit_price * credit_price + prefs.beta_balance * balance)
     # determine utility
     mode_util = attr['constant'] + beta_credit * attr['credits'] + prefs.beta_cost * attr['cost'] + beta_time * attr['gtt']
 
@@ -452,3 +464,68 @@ def util_rs_plf(row):
         U_rs = -math.inf
 
     return U_rs, int(chosen_plf_index)
+
+
+def return_gtt_chosen_mode(passengers, mode_attr):
+    '''returns generalised travel time of chosen mode for all travellers'''
+
+    df = passengers.copy()
+    df['gtt_bike'] = mode_attr['bike']['gtt']
+    df['gtt_car'] = mode_attr['car']['gtt']
+    df['gtt_pt'] = mode_attr['pt']['gtt']
+    df['gtt_rs'] = mode_attr['rs']['gtt']
+
+    gtt_chosen_mode = df.apply(lambda row: seek_indiv_mode_gtt(row), axis=1)
+
+    return gtt_chosen_mode
+
+
+def seek_indiv_mode_gtt(row):
+    '''for individual traveller, return gtt corresponding to the chosen mode'''
+
+    if row.mode_day == 'bike':
+        gtt = row.gtt_bike
+    elif row.mode_day == 'car':
+        gtt = row.gtt_car
+    elif row.mode_day == 'pt':
+        gtt = row.gtt_pt
+    elif row.mode_day == 'rs_0':
+        gtt = row.gtt_rs[0]
+    elif row.mode_day == 'rs_1':
+        gtt = row.gtt_rs[1]
+
+    return gtt
+
+
+def determine_congestion(params, inData, network_name, fp_run_id, fleetpy_dir, fleetpy_study_name):
+    '''determine congestion factor for the day based on the vehicle kilometres of car and ridesourcing rides, which are also returned'''
+    result_dir = os.path.join(fleetpy_dir, 'studies', fleetpy_study_name, 'results', fp_run_id) # where are the results stored
+    wd_eval = pd.read_csv(os.path.join(result_dir,'standard_eval.csv'))
+    plf_0_dist = wd_eval[wd_eval['Unnamed: 0'] == 'total vkm']['MoD_0'].values[0] * 1000
+    plf_0_speed = wd_eval[wd_eval['Unnamed: 0'] == 'avg driving velocity [km/h]']['MoD_0'].values[0]
+    plf_0_tt = (plf_0_dist / 1000) / plf_0_speed
+    plf_0_tt = 0 if np.isnan(plf_0_tt) else plf_0_tt
+    plf_1_dist = wd_eval[wd_eval['Unnamed: 0'] == 'total vkm']['MoD_1'].values[0] * 1000
+    plf_1_speed = wd_eval[wd_eval['Unnamed: 0'] == 'avg driving velocity [km/h]']['MoD_1'].values[0]
+    plf_1_tt = (plf_1_dist / 1000) / plf_1_speed
+    plf_1_tt = 0 if np.isnan(plf_1_tt) else plf_1_tt
+    car_dist = ((inData.passengers.mode_day == 'car') * inData.requests.dist).sum()
+    car_tt = ((inData.passengers.mode_day == 'car') * inData.requests.ttrav).sum().seconds / 3600
+    total_vkt = (plf_0_dist + plf_1_dist + car_dist) / 1000
+    total_tt = plf_0_tt + plf_1_tt + car_tt # hour
+    avg_number_of_cars_on_road_inhabitant = total_tt / params.simTime
+    avg_number_of_cars_on_road_inhabitant = params.get('total_trips', 100000) / params.nP * avg_number_of_cars_on_road_inhabitant  # how many travellers does each trav agent represent
+    avg_number_of_cars_on_road_other = params.congestion.get('avg_other_cars_on_road', 10000)
+    tot_avg_number_of_cars_on_road = avg_number_of_cars_on_road_inhabitant + avg_number_of_cars_on_road_other
+    total_road_dist = params.get('total_road_dist', pd.read_csv(os.path.join(fleetpy_dir, "data", "networks", network_name, "base", "edges.csv")).distance.sum() / 1000)  # km
+    avg_road_density = tot_avg_number_of_cars_on_road / total_road_dist  # veh/km
+    ## Determine delay factor
+    density_start_congest = params.congestion.get('start_congestion_density', 0)
+    density_zero_speed = params.congestion.get('density_zero_speed', 100)
+    if avg_road_density < density_start_congest:
+        day_congest_factor = params.congestion.get('min_delay_factor', 1)
+    else:
+        speed_rel_to_max = max(1 - (avg_road_density - density_start_congest) / (density_zero_speed - density_start_congest), 0.0001)
+        day_congest_factor = params.congestion.get('min_delay_factor', 1) / speed_rel_to_max
+
+    return day_congest_factor, car_dist, plf_0_dist, plf_1_dist
