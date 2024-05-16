@@ -278,8 +278,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_choice']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
         del all_pax, all_req, all_pax_df
 
-    # Starting credit price
+    # Starting (perceived) credit price
     credit_price = 0
+    if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary":
+        perc_credit_price = None
 
     # Starting perception of congestion
     perc_congest_factor = params.congestion.get('start_perc', 1)
@@ -312,7 +314,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Mode choice
         if params.evol.travellers.plf_choice == 'preday':
             if params.dem_mgmt:
-                inData.passengers, inData.requests = mode_preday_plf_choice_tmc(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
+                if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary": # use monetary perception of credit in mode utility
+                    perc_credit_price = learn_credit_price(credit_price, perc_credit_price, remaining_days, params)
+                    inData.passengers, inData.requests = mode_preday_plf_choice_tmc(inData, params, perc_credit_price=perc_credit_price, perc_congest_factor=perc_congest_factor, day=day)
+                else: # separate credit perception in mode utility
+                    inData.passengers, inData.requests = mode_preday_plf_choice_tmc(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
             else:
                 inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
             if params.dem_mgmt == 'tmc':

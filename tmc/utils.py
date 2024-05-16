@@ -12,15 +12,15 @@ def trip_credit_cost(inData, params):
 
     # Modes other than ridesourcing
     inData.requests['bike_credit'] = params.tmc.credit_mode.bike.base + inData.requests.dist_bike / 1000 * params.tmc.credit_mode.bike.dist
-    inData.requests['car_credit'] = params.tmc.credit_mode.car.base + inData.requests.dist / 1000 * params.tmc.credit_mode.car.dist
+    inData.requests['car_credit'] = params.tmc.credit_mode.car.base + inData.requests.dist / 1000 * ((params.tmc.credit_mode.car.dist + params.tmc.credit_mode.car.get('dist_add_center', 0)) * inData.requests.through_center)
     inData.requests['pt_credit'] = params.tmc.credit_mode.pt.base + inData.requests.PTdistance / 1000 * params.tmc.credit_mode.pt.dist
     
     def rs_plf_credit(req_dist, service_type):
         '''determine required credits for solo and pooling trip for a given trip request'''
         if service_type == 'solo':
-            trip_credit = params.tmc.credit_mode.solo.base + req_dist / 1000 * params.tmc.credit_mode.solo.dist
+            trip_credit = params.tmc.credit_mode.solo.base + req_dist / 1000 * ((params.tmc.credit_mode.solo.dist + params.tmc.credit_mode.solo.get('dist_add_center', 0)) * inData.requests.through_center)
         else:
-            trip_credit = params.tmc.credit_mode.pool.base + req_dist / 1000 * params.tmc.credit_mode.pool.dist
+            trip_credit = params.tmc.credit_mode.pool.base + req_dist / 1000 * (params.tmc.credit_mode.pool.dist + params.tmc.credit_mode.pool.get('dist_add_center', 0))
         
         return trip_credit
 
@@ -293,6 +293,7 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     prefs = params.evol.travellers.mode_pref
     props = params.alt_modes
     credit_price = kwargs.get('credit_price')
+    perc_credit_price = kwargs.get('perc_credit_price', None)
     perc_congest_factor = kwargs.get('perc_congest_factor', 1)
     mode_attr = {}
     utils = {}
@@ -344,7 +345,10 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     # Determine utility of each mode
     for mode in ['bike', 'car', 'pt', 'rs']:
         df['tmc_balance'] = df.tmc_balance if params.dem_mgmt == 'tmc' else 0
-        utils[mode] = util_credit_time(params, mode_attr[mode], credit_price, df.tmc_balance, passengers.VoT)
+        if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary":    # convert credit charge to monetary costs
+            utils[mode] = util_credit_to_cost(params, mode_attr[mode], perc_credit_price, passengers.VoT)
+        else: # credit costs perceived separately in utility
+            utils[mode] = util_credit_time(params, mode_attr[mode], credit_price, df.tmc_balance, passengers.VoT)
         utils[mode] = apply_insufficient_balance(utils[mode], mode_attr[mode]['credits'], df.tmc_balance, mode)
         if mode == 'rs':
             df['U_rs_plf'] = utils[mode]
@@ -418,7 +422,7 @@ def rs_attr_tmc(inData, params, rs_wait, rs_ivt, rs_km_fare, rs_dist, trav_vot=F
 
 
 def util_credit_time(params, attr, credit_price, balance, VoT):
-    """determine mode utility depending on generalised travel time, normal costs, credit costs and balance"""
+    """determine mode utility depending on generalised travel time, normal costs, credit costs and balance, when credit costs are perceived separately from cost"""
     prefs = params.evol.travellers.mode_pref
     mean_beta_time = math.exp(prefs.ivt_mean_lognorm + (prefs.ivt_sigma_lognorm**2)/2) # util/min
     mean_beta_time_credit = math.exp(prefs.ivt_credit_mean_lognorm + (prefs.ivt_credit_sigma_lognorm**2)/2) # credit/min
@@ -428,6 +432,20 @@ def util_credit_time(params, attr, credit_price, balance, VoT):
     beta_credit = -mean_beta_time / (mean_beta_time_credit + prefs.beta_credit_price * credit_price + prefs.beta_balance * balance)
     # determine utility
     mode_util = attr['constant'] + beta_credit * attr['credits'] + prefs.beta_cost * attr['cost'] + beta_time * attr['gtt']
+
+    return mode_util
+
+
+def util_credit_to_cost(params, attr, perc_credit_price, VoT):
+    """determine mode utility depending on generalised travel time, normal costs and historical credit costs, when credit charge is perceived as monetary cost"""
+    prefs = params.evol.travellers.mode_pref
+    beta_time = VoT * prefs.beta_cost / 3600  # util/s
+
+    # Convert learned credit price to cost
+    total_cost = attr['cost'] + perc_credit_price * attr['credits']
+
+    # Determine utility
+    mode_util = attr['constant'] + prefs.beta_cost * total_cost + beta_time * attr['gtt']
 
     return mode_util
 
@@ -529,3 +547,15 @@ def determine_congestion(params, inData, network_name, fp_run_id, fleetpy_dir, f
         day_congest_factor = params.congestion.get('min_delay_factor', 1) / speed_rel_to_max
 
     return day_congest_factor, car_dist, plf_0_dist, plf_1_dist
+
+
+def learn_credit_price(credit_price, perc_credit_price, rem_days, params):
+    '''learn credit price based on previous expected credit price and latest price'''
+    learning_weight = params.evol.travellers.get('kappa_credit_price', 0.2)
+
+    if rem_days == params.tmc.duration-1:
+        perc_credit_price = credit_price
+    else:
+        perc_credit_price = learning_weight * credit_price + (1 - learning_weight) * perc_credit_price
+
+    return perc_credit_price

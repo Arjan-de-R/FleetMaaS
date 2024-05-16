@@ -11,6 +11,7 @@ def zero_to_nan(indicator):
 
 def save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, congest_indic):
     '''Put out transportation system indicators for given day'''
+    travs_summary['through_center'] = inData.requests.through_center.copy()
     travs_summary['requests_mh'] = travs_summary.apply(lambda row: row.requests.sum() > 1, axis=1)
     travs_summary['requests_sh_0'] = travs_summary.apply(lambda row: int(row['requests'][0]) * int(not row['requests_mh']), axis=1)
     drivers_summary['ptcp_mh'] = drivers_summary.apply(lambda row: ((~row.out).sum() > 1), axis=1)
@@ -26,6 +27,7 @@ def save_market_shares(inData, params, result_path, day, travs_summary, drivers_
         conv_indic['not_enough_credit'] = travs_summary.chosen_mode.value_counts()['not_enough_credit'] if 'not_enough_credit' in travs_summary.chosen_mode.value_counts().index else 0
     for mode in ['bike', 'car', 'pt', 'rs_0', 'rs_1']:
         conv_indic['paxkm_{}'.format(mode)] = travs_summary.loc[travs_summary.chosen_mode == mode].dist.sum() / 1000 if mode in travs_summary.chosen_mode.value_counts().index else 0
+        conv_indic['trips_{}_center'.format(mode)] = travs_summary.loc[(travs_summary.chosen_mode == mode) & travs_summary.through_center].shape[0] if mode in travs_summary.chosen_mode.value_counts().index else 0
     for indic in congest_indic:
         conv_indic[indic] = congest_indic[indic]
     conv_indic['total_perc_gtt'] = inData.requests.chosen_mode_perc_gtt.sum() / 3600
