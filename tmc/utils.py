@@ -12,20 +12,20 @@ def trip_credit_cost(inData, params):
 
     # Modes other than ridesourcing
     inData.requests['bike_credit'] = params.tmc.credit_mode.bike.base + inData.requests.dist_bike / 1000 * params.tmc.credit_mode.bike.dist
-    inData.requests['car_credit'] = params.tmc.credit_mode.car.base + inData.requests.dist / 1000 * ((params.tmc.credit_mode.car.dist + params.tmc.credit_mode.car.get('dist_add_center', 0)) * inData.requests.through_center)
+    inData.requests['car_credit'] = params.tmc.credit_mode.car.base + inData.requests.dist / 1000 * (params.tmc.credit_mode.car.dist + params.tmc.credit_mode.car.get('dist_add_center', 0) * inData.requests.through_center)
     inData.requests['pt_credit'] = params.tmc.credit_mode.pt.base + inData.requests.PTdistance / 1000 * params.tmc.credit_mode.pt.dist
     
-    def rs_plf_credit(req_dist, service_type):
+    def rs_plf_credit(req_dist, service_type, through_center):
         '''determine required credits for solo and pooling trip for a given trip request'''
         if service_type == 'solo':
-            trip_credit = params.tmc.credit_mode.solo.base + req_dist / 1000 * ((params.tmc.credit_mode.solo.dist + params.tmc.credit_mode.solo.get('dist_add_center', 0)) * inData.requests.through_center)
+            trip_credit = params.tmc.credit_mode.solo.base + req_dist / 1000 * (params.tmc.credit_mode.solo.dist + params.tmc.credit_mode.solo.get('dist_add_center', 0) * through_center)
         else:
-            trip_credit = params.tmc.credit_mode.pool.base + req_dist / 1000 * (params.tmc.credit_mode.pool.dist + params.tmc.credit_mode.pool.get('dist_add_center', 0))
+            trip_credit = params.tmc.credit_mode.pool.base + req_dist / 1000 * (params.tmc.credit_mode.pool.dist + params.tmc.credit_mode.pool.get('dist_add_center', 0) * through_center)
         
         return trip_credit
 
     # Ridesourcing, depending on solo or pooling
-    inData.requests['rs_credit'] = inData.requests.apply(lambda row: np.array([rs_plf_credit(row.dist, params.platforms.service_types[plat_id]) for plat_id in range(0,len(params.platforms.service_types))]), axis=1)
+    inData.requests['rs_credit'] = inData.requests.apply(lambda row: np.array([rs_plf_credit(row.dist, params.platforms.service_types[plat_id], row.through_center) for plat_id in range(0,len(params.platforms.service_types))]), axis=1)
 
     return inData.requests
 
@@ -90,7 +90,10 @@ def buy_table_dimensions(params):
     '''Determine which values are included in the table with quantities depending on price and credit balance'''
     min_price_step = params.tmc.price.get('step', 0.01)
     min_balance_step = params.tmc.balance.get('step', 0.1)
-    max_balance = params.tmc.get('max_balance', params.tmc.max_balance_rel_to_init_allocation * params.tmc.allocated_credits_per_day * params.tmc.duration)
+    allocated_credits_per_day = params.tmc.get('allocated_credits_per_day', 10)
+    avg_allocated_credits_per_day = allocated_credits_per_day if isinstance(allocated_credits_per_day, (int, float)) else np.array([allocated_credits_per_day]).mean()
+
+    max_balance = params.tmc.get('max_balance', params.tmc.max_balance_rel_to_init_allocation * avg_allocated_credits_per_day * params.tmc.get('duration', 25))
     max_buy_quant = params.tmc.get('max_buy_day', max_balance)
 
     # Determine dimensions of database: balance quantities and credit price levels
@@ -314,7 +317,10 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
         requests.loc[requests.dest_center, 'car_park_cost'] = props.car.park_cost_center
     mode_attr['car']['cost'] = props.car.km_cost * (requests.dist / 1000) + requests.car_park_cost
     if params.dem_mgmt == 'cgp':
-        mode_attr['car']['cost'] = mode_attr['car']['cost'] + requests.through_center * params.zone_charge.get('car', 5)
+        if not params.get('city_charge', False):
+            mode_attr['car']['cost'] = mode_attr['car']['cost'] + requests.through_center * params.zone_charge.get('car', 5)
+        else:
+            mode_attr['car']['cost'] = mode_attr['car']['cost'] + params.city_charge.get('car', 5)
     mode_attr['car']['gtt'] = prefs.access_multip * props.car.access_time + car_ivt # generalised travel time
     mode_attr['car']['constant'] = passengers.ASC_car
     mode_attr['car']['credits'] = requests.car_credit if params.dem_mgmt == 'tmc' else 0
@@ -335,7 +341,10 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     if params.dem_mgmt == 'cgp':
         congestion_charge = []
         for plf in range(len(params.platforms.service_types)):
-            plf_charge = params.zone_charge.get('solo', 5) if params.platforms.service_types[plf] == 'solo' else params.zone_charge.get('pool', 0)
+            if not params.get('city_charge', False):
+                plf_charge = params.zone_charge.get('solo', 5) if params.platforms.service_types[plf] == 'solo' else params.zone_charge.get('pool', 0)
+            else:
+                plf_charge = params.city_charge.get('solo', 5) if params.platforms.service_types[plf] == 'solo' else params.city_charge.get('pool', 0)
             congestion_charge.append(plf_charge)
         mode_attr['rs'] = rs_attr_tmc(inData, params, df.expected_wait * perc_congest_factor, df.expected_ivt * perc_congest_factor, df.expected_km_fare, inData.requests.dist, congestion_charge=congestion_charge)
     else:
@@ -346,6 +355,8 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     for mode in ['bike', 'car', 'pt', 'rs']:
         df['tmc_balance'] = df.tmc_balance if params.dem_mgmt == 'tmc' else 0
         if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary":    # convert credit charge to monetary costs
+            if params.dem_mgmt != "tmc":
+                perc_credit_price = 0
             utils[mode] = util_credit_to_cost(params, mode_attr[mode], perc_credit_price, passengers.VoT)
         else: # credit costs perceived separately in utility
             utils[mode] = util_credit_time(params, mode_attr[mode], credit_price, df.tmc_balance, passengers.VoT)
@@ -404,7 +415,10 @@ def rs_attr_tmc(inData, params, rs_wait, rs_ivt, rs_km_fare, rs_dist, trav_vot=F
         if congestion_charge is not None:
             df_cost = pd.DataFrame()
             df_cost['rs_fare'] = rs_fare
-            df_cost['congest_charge'] = inData.requests.apply(lambda row: np.array(congestion_charge) * row.through_center, axis=1) 
+            if not params.get('city_charge', False): # zone charge
+                df_cost['congest_charge'] = inData.requests.apply(lambda row: np.array(congestion_charge) * row.through_center, axis=1)
+            else: # city-wide congestion charge
+                df_cost['congest_charge'] = inData.requests.apply(lambda row: np.array(congestion_charge), axis=1) 
             rs_fare = df_cost.apply(lambda row: row.rs_fare + row.congest_charge, axis=1)
         ASC_rs = passengers.ASC_rs
     else:  # only for an individual traveller
@@ -511,6 +525,8 @@ def seek_indiv_mode_gtt(row):
         gtt = row.gtt_rs[0]
     elif row.mode_day == 'rs_1':
         gtt = row.gtt_rs[1]
+    else:
+        gtt = None
 
     return gtt
 
@@ -559,3 +575,45 @@ def learn_credit_price(credit_price, perc_credit_price, rem_days, params):
         perc_credit_price = learning_weight * credit_price + (1 - learning_weight) * perc_credit_price
 
     return perc_credit_price
+
+
+def charge_based_on_mode_and_location(params, row):
+    '''find mode and check whether shortest path of trips traverses congestion zone'''
+    if params.get('city_charge', False): # city-wide charge
+        if row.mode_day == 'car':
+            return params.city_charge.get('car', 5)
+        elif row.mode_day.startswith('rs'):
+            plf_id = int(row.mode_day.split("_")[-1])
+            return params.city_charge.get('solo', 5) if params.platforms.service_types[plf_id] == 'solo' else params.city_charge.get('pool', 0)
+        else:
+            return 0
+    else: # zone-specific charge (city centre)
+        if not row.through_center:
+            return 0
+        elif row.mode_day == 'car':
+            return params.zone_charge.get('car', 5)
+        elif row.mode_day.startswith('rs'):
+            plf_id = int(row.mode_day.split("_")[-1])
+            return params.zone_charge.get('solo', 5) if params.platforms.service_types[plf_id] == 'solo' else params.zone_charge.get('pool', 0)
+        else:
+            return 0
+    
+
+def determine_congestion_charge(inData, params):
+    '''determine travellers paid congestion charge'''
+
+    df = pd.concat([inData.passengers.mode_day, inData.requests.through_center], axis=1)
+    df['paid_cgp'] = df.apply(lambda row: charge_based_on_mode_and_location(params, row), axis=1)
+
+    return df['paid_cgp']
+
+
+def determine_starting_balance(inData, params, credits_per_day):
+    '''set travellers' starting balance (possibly depending on their VoT)'''
+    if isinstance(credits_per_day, (int, float, None)):
+        tmc_balance = credits_per_day * params.tmc.get('duration', 25)
+    else:
+        vot_class = pd.qcut(inData.passengers['VoT'], q=len(credits_per_day), labels=False)
+        tmc_balance = vot_class.map(lambda x: credits_per_day[x] * params.tmc.get('duration', 25))
+
+    return tmc_balance

@@ -55,7 +55,18 @@ def single_pararun(one_slice, *args):
     scn_name = '{}-'.format(params.get('dem_mgmt', 'None'))
     if params.platforms.service_types:
         cmpt_type_string = "".join([item[0] for item in params.platforms.service_types])
-        scn_name = '-{}-{}'.format(params.get('dem_mgmt', 'None'), cmpt_type_string)
+        dem_mgmt_string = params.get('dem_mgmt', 'None')
+        if dem_mgmt_string == 'tmc':
+            if params.get('charging_scheme'):
+                dem_mgmt_string = 'tmc{}_{}'.format(params.tmc.allocated_credits_per_day, params.get('charging_scheme'))
+            else:
+                dem_mgmt_string = 'tmc{}'.format(params.tmc.allocated_credits_per_day)
+        elif dem_mgmt_string == 'cgp':
+            if params.get('city_charge'):
+                dem_mgmt_string = 'city_cgp{}'.format(params.city_charge.car)
+            else:
+                dem_mgmt_string = 'cgp{}'.format(params.zone_charge.car)
+        scn_name = '-{}-{}'.format(dem_mgmt_string, cmpt_type_string)
     for key, value in stamp.items():
         if key != 'service_types':
             scn_name += '-{}-{}'.format(key, value)
@@ -198,8 +209,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     if params.dem_mgmt == 'tmc':
         # Set starting mobility credit balance
-        credits_allocated = params.tmc.get('allocated_credits_per_day', 10) * params.tmc.get('duration', 25)
-        inData.passengers['tmc_balance'] = credits_allocated
+        credits_per_day = params.tmc.get('allocated_credits_per_day', 10)
+        inData.passengers['tmc_balance'] = determine_starting_balance(inData, params, credits_per_day)
         inData.passengers['money_balance'] = 0
         inData.passengers['tot_credit_bought'] = 0
         inData.passengers['tot_credit_sold'] = 0
@@ -264,10 +275,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     with open(os.path.join(result_path, '0_params.json'), 'w') as json_file:
         json.dump(params, json_file)
     
-    df_req = inData.requests[['pax_id','origin','destination','treq','dist','ttrav']]
+    df_req = inData.requests[['pax_id','origin','destination','treq','dist','ttrav', 'ttrav_bike', 'transitTime', 'waitingTime', 'PTfare', 'through_center']]
+    df_req.rename(columns={'ttrav':'ttrav_car', 'waitingTime': 'PT_waitingTime', 'transitTime': 'PT_ivTime'}, inplace=True)
     if 'haver_dist' in inData.requests.columns:
         df_req['haver_dist'] = inData.requests['haver_dist']
-    df_pax_cols = [x for x in ['VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming'] if x in inData.passengers.columns]
+    df_pax_cols = [x for x in ['VoT','ASC_rs','ASC_pool','ASC_car','ASC_pt','ASC_bike','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming'] if x in inData.passengers.columns]
     df_pax = inData.passengers[df_pax_cols]
     pd.concat([df_req, df_pax], axis=1).to_csv(os.path.join(result_path,'1_pax-properties.csv'))
     inData.vehicles[['pos', 'res_wage', 'multihoming']].to_csv(os.path.join(result_path,'2_driver-properties.csv'))
@@ -301,7 +313,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Credit trading
         if params.dem_mgmt == 'tmc':
             if remaining_days == 0: # new credits are assigned
-                inData.passengers['tmc_balance'] = credits_allocated
+                inData.passengers['tmc_balance'] = determine_starting_balance(inData, params, credits_per_day)
                 remaining_days = credit_validity
             inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(params, buy_table_dims, remaining_days, row.tmc_balance), axis=1)
             credit_price, satisfied_orders, denied_orders = trading(inData, buy_table_dims)
@@ -314,7 +326,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         # Mode choice
         if params.evol.travellers.plf_choice == 'preday':
             if params.dem_mgmt:
-                if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary": # use monetary perception of credit in mode utility
+                if params.dem_mgmt == "tmc" and params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary": # use monetary perception of credit in mode utility
                     perc_credit_price = learn_credit_price(credit_price, perc_credit_price, remaining_days, params)
                     inData.passengers, inData.requests = mode_preday_plf_choice_tmc(inData, params, perc_credit_price=perc_credit_price, perc_congest_factor=perc_congest_factor, day=day)
                 else: # separate credit perception in mode utility
@@ -404,7 +416,11 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         res_inf_trav = wom_trav(inData, travs_summary, params=params)
         inData.passengers.informed = res_inf_trav.informed
         inData = platform_regist_trav(inData, travs_summary, params=params)
-            
+
+        # Determine congestion charge paid
+        if params.dem_mgmt == 'cgp':
+            inData.passengers['paid_cgp'] = determine_congestion_charge(inData, params)
+
         # Store KPIs of day
         dem_df, sup_df = d2d_summary_day(inData, drivers_summary, travs_summary)
         dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))

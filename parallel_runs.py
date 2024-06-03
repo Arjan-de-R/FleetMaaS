@@ -24,7 +24,7 @@ params.platforms.service_types = ['solo', 'pool']  # list with 'solo' or 'pool' 
 # params.paths.PT_trips = os.path.join(MAASSIM_DIR,'data','demand','{}'.format(params.city.split(",")[0],'albatross','req_PT.csv')
 # params.study_name = 'competition_trb24'
 # params.paths.fleetpy_config = 'constant_config.csv'
-params.nP = 1000 # travellers
+params.nP = 10000 # travellers
 params.nV = 100 # drivers
 # params.simTime = 8 # hours
 ## Platform settings - platform 0
@@ -65,15 +65,30 @@ params.nV = 100 # drivers
 # params.alt_modes.pt.base_fare = 1.0
 # params.alt_modes.pt.km_fare = 0.2
 
-params.dem_mgmt = 'tmc' # 'None', 'tmc', 'lpr', 'cgp'
-# params.tmc.duration = 25  # days
+params.dem_mgmt = 'cgp' # 'None', 'tmc', 'lpr', 'cgp'
+params.tmc.duration = 30  # days
 params.nD = 2 * params.tmc.duration # max. number of days
-params.tmc.allocated_credits_per_day = 5  # credit/day
+params.tmc.allocated_credits_per_day = 10 # credit/day
 # params.tmc.beta_monetary = -0.2
 # params.tmc.max_balance = 1000
-# params.tmc.credit_mode.bike.base = 0.5
-# params.tmc.credit_mode.car.base = 20
-# params.tmc.credit_mode.pt.base = 20
+# params.tmc.credit_mode.bike.base = 1
+# params.tmc.credit_mode.car.base = 8
+# # params.tmc.credit_mode.pt.base = 1
+# params.tmc.credit_mode.solo.base = 12
+# params.tmc.credit_mode.pool.base = 8
+# params.tmc.credit_mode.solo.dist_add_center = 9
+# params.tmc.credit_mode.pool.dist_add_center = 6
+# params.tmc.credit_mode.car.dist_add_center = 6
+# params.zone_charge.car=30
+# params.zone_charge.solo=30
+# params.charging_scheme = "add_centre_charge"
+
+params.city_charge.solo = 20
+params.city_charge.pool = 0
+params.city_charge.car = 20
+
+# params.tmc.allocated_credits_per_day = [15, 12.5, 10, 7.5, 5]
+# params.tmc.allocated_credits_per_day = [20, 7.5, 7.5, 7.5, 7.5]
 
 # ## Starting conditions
 # params.evol.travellers.inform.prob_start = 0.2
@@ -108,7 +123,7 @@ def sample_space():
     space.service_types = [['solo', 'pool']]
     # space.dem_mh_share = [0.5]
     # space.sup_mh_share = [0.5]
-    space.repl_id = [5]
+    space.repl_id = [7]
     return space
 
 def determine_n_threads(search_space):
