@@ -2,8 +2,8 @@ import pandas as pd
 import os
 from scipy.stats import t
 
-def create_d2d_df_list(repl_id, day_id, repl_folder_path, item, agent_type, d2d_df_list):
-    day_df = pd.read_csv(os.path.join(repl_folder_path, item), index_col=False)
+def create_d2d_df_list(repl_id, day_id, repl_folder_path, item, agent_type, d2d_df_list, cols=None):
+    day_df = pd.read_csv(os.path.join(repl_folder_path, item), index_col=False, usecols=cols)
     day_df['repl'] = repl_id
     day_df['day'] = day_id
     index_list = ['repl', 'day', agent_type]
@@ -13,8 +13,8 @@ def create_d2d_df_list(repl_id, day_id, repl_folder_path, item, agent_type, d2d_
     return d2d_df_list
 
 
-def create_attr_df_list(repl_id, repl_folder_path, item, index_name, attr_df_list):
-    df = pd.read_csv(os.path.join(repl_folder_path, item), index_col=False)
+def create_attr_df_list(repl_id, repl_folder_path, item, index_name, attr_df_list, cols=None):
+    df = pd.read_csv(os.path.join(repl_folder_path, item), index_col=False, usecols=cols)
     df['repl'] = repl_id
     index_list = ['repl']
     if index_name == 'veh_id':

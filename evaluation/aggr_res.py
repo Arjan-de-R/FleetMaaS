@@ -17,8 +17,10 @@ import pickle
 
 # Which scenarios?
 # var_dict = {'cmpt_type': ['s','p','ss','pp','sp']}  # assumes full enumeration
-var_dict = {'cmpt_type': ['ss'], 'dem_mh_share': [0.5, 1], 'sup_mh_share': [0]}  # assumes full enumeration
+var_dict = {'cmpt_type': ['ss']}  # assumes full enumeration
+# var_dict = {'cmpt_type': ['ss'], 'dem_mh_share': [0, 0.5, 1], 'sup_mh_share': [0.5, 1]}  # assumes full enumeration
 # var_dict = {'cmpt_type': ['sp'], 'start_reg_plf_share': ['0.1 0.9', '0.3 0.7', '0.7 0.3', '0.9 0.1']}  # assumes full enumeration
+# var_dict = {'cmpt_type': ['sp'], 'start_wait': [300, 600]}  # assumes full enumeration
 # ref_value = {'name': 'num_signals', 'val': 50}
 
 # Required parameter values for statistical significance of equilibria
@@ -175,16 +177,22 @@ for scn_name in scenario_names:
     d2d_pax_stats['requests_sh_largest'] = d2d_pax_stats[['requests_sh_0','requests_sh_1']].max(axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['gets_offer_mh_0'] = pivot_result['gets_offer_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['gets_offer_mh_1'] = pivot_result['gets_offer_1'][True] if any_trav_mh and 'gets_offer_1' in pivot_result.columns  else np.nan
+    d2d_pax_stats['gets_offer_mh_largest'] = pivot_result.apply(lambda row: row.gets_offer_0[True] if (row.requests_0[False] >= row.requests_1[False]) else row.gets_offer_1[True], axis=1) if (any_trav_mh and any_trav_sh) and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['gets_offer_sh_0'] = pivot_result['gets_offer_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['gets_offer_sh_1'] = pivot_result['gets_offer_1'][False] if any_trav_sh and 'gets_offer_1' in pivot_result.columns else np.nan
     d2d_pax_stats['accepts_offer_mh_0'] = pivot_result['accepts_offer_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['accepts_offer_mh_1'] = pivot_result['accepts_offer_1'][True] if any_trav_mh and 'accepts_offer_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['accepts_offer_mh_largest'] = pivot_result.apply(lambda row: row.accepts_offer_0[True] if (row.requests_0[False] >= row.requests_1[False]) else row.accepts_offer_1[True], axis=1) if (any_trav_mh and any_trav_sh) and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['exp_wait_mh'] = pivot_result['xp_wait_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['exp_wait_sh_0'] = pivot_result['xp_wait_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['exp_wait_sh_1'] = pivot_result['xp_wait_1'][False] if any_trav_sh and 'xp_wait_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_wait_sh_largest'] = pivot_result.apply(lambda row: row.xp_wait_0[False] if (row.requests_0[False] >= row.requests_1[False]) else row.xp_wait_1[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_wait_sh_smallest'] = pivot_result.apply(lambda row: row.xp_wait_1[False] if (row.requests_0[False] >= row.requests_1[False]) else row.xp_wait_0[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['exp_corr_wait_mh'] = pivot_result['corr_xp_wait_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['exp_corr_wait_sh_0'] = pivot_result['corr_xp_wait_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['exp_corr_wait_sh_1'] = pivot_result['corr_xp_wait_1'][False] if any_trav_sh and 'corr_xp_wait' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_corr_wait_sh_largest'] = pivot_result.apply(lambda row: row.corr_xp_wait_0[False] if (row.requests_0[False] >= row.requests_1[False]) else row.corr_xp_wait_1[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_corr_wait_sh_smallest'] = pivot_result.apply(lambda row: row.corr_xp_wait_1[False] if (row.requests_0[False] >= row.requests_1[False]) else row.corr_xp_wait_0[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['exp_detour_mh'] = pivot_result['xp_detour_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['exp_detour_sh_0'] = pivot_result['xp_detour_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['exp_detour_sh_1'] = pivot_result['xp_detour_1'][False] if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
@@ -194,6 +202,8 @@ for scn_name in scenario_names:
     d2d_pax_stats['perc_wait_mh'] = pivot_result['expected_wait_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['perc_wait_sh_0'] = pivot_result['expected_wait_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['perc_wait_sh_1'] = pivot_result['expected_wait_1'][False] if any_trav_sh and 'expected_wait_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['perc_wait_sh_largest'] = pivot_result.apply(lambda row: row.expected_wait_0[False] if (row.requests_0[False] >= row.requests_1[False]) else row.expected_wait_1[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['perc_wait_sh_smallest'] = pivot_result.apply(lambda row: row.expected_wait_1[False] if (row.requests_0[False] >= row.requests_1[False]) else row.expected_wait_0[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['perc_detour_mh'] = pivot_result['expected_detour_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['perc_detour_sh_0'] = pivot_result['expected_detour_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['perc_detour_sh_1'] = pivot_result['expected_detour_1'][False] if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
@@ -220,6 +230,25 @@ for scn_name in scenario_names:
     #                                                             'xp_wait_0': 'mean', 'xp_wait_1': 'mean', 'xp_ivt_0': 'mean', 'xp_ivt_1': 'mean'})
     with open(os.path.join(aggr_scn_path, 'repl_dem_select.pkl'), 'wb') as f:
         pickle.dump(d2d_pax_stats, f)
+
+    # From hereon, only consider days in equilibrium (and reindex starting from 0)
+    def select_eql_days_aggr(df):
+        '''filter only days in equilibrium in dataframes with data aggregated for the population (no individual travellers)'''
+        df = df.groupby(level='repl').tail(conv_steady_days + moving_average_days).reset_index()
+        df['day'] = df.groupby('repl').cumcount()
+        df = df.set_index(['repl', 'day'])
+        return df
+    
+    def select_eql_days_indiv(df, agent):
+        '''filter only days in equilibrium for dataframes with individual travellers'''
+        df = df.groupby(level=['repl', agent]).tail(conv_steady_days + moving_average_days).reset_index()
+        df['day'] = df.groupby(['repl', agent]).cumcount()
+        df = df.set_index(['repl', 'day', agent])
+        return df
+
+    d2d_pax = select_eql_days_indiv(d2d_pax, 'pax')
+    d2d_pax_stats = select_eql_days_aggr(d2d_pax_stats)
+    d2d_pax_reset = select_eql_days_indiv(d2d_pax_reset, 'pax')
 
     # Created population-level statistics (aggregate over agents) for each replication - on the demand side
     mean_indicators, count_indicators = [], []
@@ -338,9 +367,13 @@ for scn_name in scenario_names:
     d2d_veh_stats['exp_inc_mh'] = pivot_result['exp_inc_0'][True] if any_driver_mh else np.nan
     d2d_veh_stats['exp_inc_sh_0'] = pivot_result['exp_inc_0'][False] if any_driver_sh else np.nan
     d2d_veh_stats['exp_inc_sh_1'] = pivot_result['exp_inc_1'][False] if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['exp_inc_sh_largest'] = pivot_result.apply(lambda row: row.exp_inc_0[False] if (row.ptcp_0[False] >= row.ptcp_1[False]) else row.exp_inc_1[False], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['exp_inc_sh_smallest'] = pivot_result.apply(lambda row: row.exp_inc_1[False] if (row.ptcp_0[False] >= row.ptcp_1[False]) else row.exp_inc_0[False], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
     d2d_veh_stats['perc_inc_mh'] = pivot_result['expected_income_0'][True] if any_driver_mh else np.nan
     d2d_veh_stats['perc_inc_sh_0'] = pivot_result['expected_income_0'][False] if any_driver_sh else np.nan
     d2d_veh_stats['perc_inc_sh_1'] = pivot_result['expected_income_1'][False] if any_driver_sh and 'expected_income_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['perc_inc_sh_largest'] = pivot_result.apply(lambda row: row.expected_income_0[False] if (row.ptcp_0[False] >= row.ptcp_1[False]) else row.expected_income_1[False], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['perc_inc_sh_smallest'] = pivot_result.apply(lambda row: row.expected_income_1[False] if (row.ptcp_0[False] >= row.ptcp_1[False]) else row.expected_income_0[False], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
     d2d_veh_stats[['new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']] = d2d_veh_reset.groupby(['repl', 'day'])[count_indicators].sum()[['new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']]
 
     # Save selected results per replication for selected indicators (only single-homing)
@@ -359,6 +392,11 @@ for scn_name in scenario_names:
     #                                                    'exp_inc_0': 'mean', 'exp_inc_1': 'mean'})
     with open(os.path.join(aggr_scn_path, 'repl_sup_select.pkl'), 'wb') as f:
         pickle.dump(d2d_veh_stats, f)
+
+    # From hereon, only consider days in equilibrium (and reindex starting from 0)
+    d2d_veh = select_eql_days_indiv(d2d_veh, 'veh')
+    d2d_veh_stats = select_eql_days_aggr(d2d_veh_stats)
+    d2d_veh_reset = select_eql_days_indiv(d2d_veh_reset, 'veh')
 
     # Create the pivot results - multihoming / registered
     mean_indicators, count_indicators = [], []
