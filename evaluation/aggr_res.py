@@ -17,10 +17,10 @@ import pickle
 
 # Which scenarios?
 # var_dict = {'cmpt_type': ['s','p','ss','pp','sp']}  # assumes full enumeration
-var_dict = {'cmpt_type': ['ss']}  # assumes full enumeration
-# var_dict = {'cmpt_type': ['ss'], 'dem_mh_share': [0, 0.5, 1], 'sup_mh_share': [0.5, 1]}  # assumes full enumeration
+# var_dict = {'cmpt_type': ['ss']}  # assumes full enumeration
+# var_dict = {'cmpt_type': ['ss'], 'dem_mh_share': [0.5, 1], 'sup_mh_share': [0]}  # assumes full enumeration
 # var_dict = {'cmpt_type': ['sp'], 'start_reg_plf_share': ['0.1 0.9', '0.3 0.7', '0.7 0.3', '0.9 0.1']}  # assumes full enumeration
-# var_dict = {'cmpt_type': ['sp'], 'start_wait': [300, 600]}  # assumes full enumeration
+var_dict = {'cmpt_type': ['ss'], 'beta_reg': [0.1, 0.25], 'sup_util_multiplier': [5]}  # assumes full enumeration
 # ref_value = {'name': 'num_signals', 'val': 50}
 
 # Required parameter values for statistical significance of equilibria
@@ -122,6 +122,12 @@ for scn_name in scenario_names:
     all_pax_attr = all_pax_attr.sort_index(level=['repl','pax_id'])
     conv_df = conv_df.sort_index(level=['repl','day'])
 
+    # Determine winning platform - based on last day (most demand)
+    last_day_df = conv_df.groupby('repl').tail(1).copy()
+    last_day_df['plf_0_winner'] = True
+    last_day_df.loc[last_day_df['ptcp_dem_sh_0'] < last_day_df['ptcp_dem_sh_1'], 'plf_0_winner'] = False
+    last_day_df = last_day_df.reset_index(level='day', drop=True)
+
     # Convert time string to seconds
     pax_attr['ttrav'] = pax_attr.apply(lambda row: time_string_to_seconds(row.ttrav), axis=1)
 
@@ -174,25 +180,18 @@ for scn_name in scenario_names:
     d2d_pax_stats['requests_sh_0'] = pivot_result['requests_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['registered_sh_1'] = pivot_result['registered_1'][False] if any_trav_sh and 'registered_1' in pivot_result.columns else np.nan
     d2d_pax_stats['requests_sh_1'] = pivot_result['requests_1'][False] if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['requests_sh_largest'] = d2d_pax_stats[['requests_sh_0','requests_sh_1']].max(axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['gets_offer_mh_0'] = pivot_result['gets_offer_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['gets_offer_mh_1'] = pivot_result['gets_offer_1'][True] if any_trav_mh and 'gets_offer_1' in pivot_result.columns  else np.nan
-    d2d_pax_stats['gets_offer_mh_largest'] = pivot_result.apply(lambda row: row.gets_offer_0[True] if (row.requests_0[False] >= row.requests_1[False]) else row.gets_offer_1[True], axis=1) if (any_trav_mh and any_trav_sh) and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['gets_offer_sh_0'] = pivot_result['gets_offer_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['gets_offer_sh_1'] = pivot_result['gets_offer_1'][False] if any_trav_sh and 'gets_offer_1' in pivot_result.columns else np.nan
     d2d_pax_stats['accepts_offer_mh_0'] = pivot_result['accepts_offer_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['accepts_offer_mh_1'] = pivot_result['accepts_offer_1'][True] if any_trav_mh and 'accepts_offer_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['accepts_offer_mh_largest'] = pivot_result.apply(lambda row: row.accepts_offer_0[True] if (row.requests_0[False] >= row.requests_1[False]) else row.accepts_offer_1[True], axis=1) if (any_trav_mh and any_trav_sh) and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['exp_wait_mh'] = pivot_result['xp_wait_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['exp_wait_sh_0'] = pivot_result['xp_wait_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['exp_wait_sh_1'] = pivot_result['xp_wait_1'][False] if any_trav_sh and 'xp_wait_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['exp_wait_sh_largest'] = pivot_result.apply(lambda row: row.xp_wait_0[False] if (row.requests_0[False] >= row.requests_1[False]) else row.xp_wait_1[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['exp_wait_sh_smallest'] = pivot_result.apply(lambda row: row.xp_wait_1[False] if (row.requests_0[False] >= row.requests_1[False]) else row.xp_wait_0[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['exp_corr_wait_mh'] = pivot_result['corr_xp_wait_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['exp_corr_wait_sh_0'] = pivot_result['corr_xp_wait_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['exp_corr_wait_sh_1'] = pivot_result['corr_xp_wait_1'][False] if any_trav_sh and 'corr_xp_wait' in pivot_result.columns else np.nan
-    d2d_pax_stats['exp_corr_wait_sh_largest'] = pivot_result.apply(lambda row: row.corr_xp_wait_0[False] if (row.requests_0[False] >= row.requests_1[False]) else row.corr_xp_wait_1[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['exp_corr_wait_sh_smallest'] = pivot_result.apply(lambda row: row.corr_xp_wait_1[False] if (row.requests_0[False] >= row.requests_1[False]) else row.corr_xp_wait_0[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['exp_detour_mh'] = pivot_result['xp_detour_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['exp_detour_sh_0'] = pivot_result['xp_detour_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['exp_detour_sh_1'] = pivot_result['xp_detour_1'][False] if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
@@ -202,8 +201,6 @@ for scn_name in scenario_names:
     d2d_pax_stats['perc_wait_mh'] = pivot_result['expected_wait_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['perc_wait_sh_0'] = pivot_result['expected_wait_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['perc_wait_sh_1'] = pivot_result['expected_wait_1'][False] if any_trav_sh and 'expected_wait_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['perc_wait_sh_largest'] = pivot_result.apply(lambda row: row.expected_wait_0[False] if (row.requests_0[False] >= row.requests_1[False]) else row.expected_wait_1[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
-    d2d_pax_stats['perc_wait_sh_smallest'] = pivot_result.apply(lambda row: row.expected_wait_1[False] if (row.requests_0[False] >= row.requests_1[False]) else row.expected_wait_0[False], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
     d2d_pax_stats['perc_detour_mh'] = pivot_result['expected_detour_0'][True] if any_trav_mh else np.nan
     d2d_pax_stats['perc_detour_sh_0'] = pivot_result['expected_detour_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['perc_detour_sh_1'] = pivot_result['expected_detour_1'][False] if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
@@ -211,23 +208,19 @@ for scn_name in scenario_names:
     d2d_pax_stats['perc_km_fare_sh_0'] = pivot_result['expected_km_fare_0'][False] if any_trav_sh else np.nan
     d2d_pax_stats['perc_km_fare_sh_1'] = pivot_result['expected_km_fare_1'][False] if any_trav_sh and 'expected_km_fare_1' in pivot_result.columns else np.nan
 
-    # # Save results per replication for selected indicators
-    # select_df = d2d_pax_reset.copy()[['requests_0','gets_offer_0','xp_wait_0','xp_ivt_0','registered_0']] # km-fare and pooling detour (rel.)
-    # if 'requests_1' in d2d_pax_reset.columns:
-    #     cols_1 = d2d_pax_reset.copy()[['requests_1','gets_offer_1','xp_wait_1','xp_ivt_1','registered_1']]
-    #     select_df = pd.concat([select_df,cols_1],axis=1)
-    # else:
-    #     new_columns = {
-    #         'requests_1': np.nan,
-    #         'gets_offer_1': np.nan,
-    #         'xp_wait_1': np.nan,
-    #         'xp_ivt_1': np.nan,
-    #         'registered_1': np.nan
-    #     }
-    #     select_df = select_df.assign(**new_columns)
-    # select_df = select_df.groupby(level=['repl', 'day']).agg({'requests_0': 'sum', 'requests_1': 'sum', 'gets_offer_0': 'sum', 'gets_offer_1': 'sum', 
-    #                                                           'registered_0': 'sum', 'registered_1': 'sum', 
-    #                                                             'xp_wait_0': 'mean', 'xp_wait_1': 'mean', 'xp_ivt_0': 'mean', 'xp_ivt_1': 'mean'})
+    # Statistics for winning platform
+    d2d_pax_stats = d2d_pax_stats.reset_index().merge(last_day_df.reset_index(), on='repl', how='left').set_index(['repl', 'day'])      # Merge the d2d_pax_stats with last_day_df to get 'plf_0_winner' for each 'repl'
+    d2d_pax_stats['requests_sh_largest'] = d2d_pax_stats.apply(lambda row: row['requests_sh_0'] if row['plf_0_winner'] else row['requests_sh_1'], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['gets_offer_mh_largest'] = d2d_pax_stats.apply(lambda row: row['gets_offer_mh_0'] if row['plf_0_winner'] else row['gets_offer_mh_1'], axis=1) if (any_trav_mh and any_trav_sh) and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['accepts_offer_mh_largest'] = d2d_pax_stats.apply(lambda row: row['accepts_offer_mh_0'] if row['plf_0_winner'] else row['accepts_offer_mh_1'], axis=1) if (any_trav_mh and any_trav_sh) and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_wait_sh_largest'] = d2d_pax_stats.apply(lambda row: row['exp_wait_sh_0'] if row['plf_0_winner'] else row['exp_wait_sh_1'], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_wait_sh_smallest'] = d2d_pax_stats.apply(lambda row: row['exp_wait_sh_1'] if row['plf_0_winner'] else row['exp_wait_sh_0'], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_corr_wait_sh_largest'] = d2d_pax_stats.apply(lambda row: row['exp_corr_wait_sh_0'] if row['plf_0_winner'] else row['exp_corr_wait_sh_1'], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['exp_corr_wait_sh_smallest'] = d2d_pax_stats.apply(lambda row: row['exp_corr_wait_sh_1'] if row['plf_0_winner'] else row['exp_corr_wait_sh_0'], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['perc_wait_sh_largest'] = d2d_pax_stats.apply(lambda row: row['perc_wait_sh_0'] if row['plf_0_winner'] else row['perc_wait_sh_1'], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats['perc_wait_sh_smallest'] = d2d_pax_stats.apply(lambda row: row['perc_wait_sh_1'] if row['plf_0_winner'] else row['perc_wait_sh_0'], axis=1) if any_trav_sh and 'requests_1' in pivot_result.columns else np.nan
+    d2d_pax_stats = d2d_pax_stats.drop(columns=['plf_0_winner'])
+
     with open(os.path.join(aggr_scn_path, 'repl_dem_select.pkl'), 'wb') as f:
         pickle.dump(d2d_pax_stats, f)
 
@@ -363,33 +356,23 @@ for scn_name in scenario_names:
     d2d_veh_stats['ptcp_mh'] = pivot_result['ptcp_0'][True] if any_driver_mh else np.nan
     d2d_veh_stats['ptcp_sh_0'] = pivot_result['ptcp_0'][False] if any_driver_sh else np.nan
     d2d_veh_stats['ptcp_sh_1'] = pivot_result['ptcp_1'][False] if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
-    d2d_veh_stats['ptcp_sh_largest'] = d2d_veh_stats[['ptcp_sh_0','ptcp_sh_1']].max(axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
     d2d_veh_stats['exp_inc_mh'] = pivot_result['exp_inc_0'][True] if any_driver_mh else np.nan
     d2d_veh_stats['exp_inc_sh_0'] = pivot_result['exp_inc_0'][False] if any_driver_sh else np.nan
     d2d_veh_stats['exp_inc_sh_1'] = pivot_result['exp_inc_1'][False] if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
-    d2d_veh_stats['exp_inc_sh_largest'] = pivot_result.apply(lambda row: row.exp_inc_0[False] if (row.ptcp_0[False] >= row.ptcp_1[False]) else row.exp_inc_1[False], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
-    d2d_veh_stats['exp_inc_sh_smallest'] = pivot_result.apply(lambda row: row.exp_inc_1[False] if (row.ptcp_0[False] >= row.ptcp_1[False]) else row.exp_inc_0[False], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
     d2d_veh_stats['perc_inc_mh'] = pivot_result['expected_income_0'][True] if any_driver_mh else np.nan
     d2d_veh_stats['perc_inc_sh_0'] = pivot_result['expected_income_0'][False] if any_driver_sh else np.nan
     d2d_veh_stats['perc_inc_sh_1'] = pivot_result['expected_income_1'][False] if any_driver_sh and 'expected_income_1' in pivot_result.columns else np.nan
-    d2d_veh_stats['perc_inc_sh_largest'] = pivot_result.apply(lambda row: row.expected_income_0[False] if (row.ptcp_0[False] >= row.ptcp_1[False]) else row.expected_income_1[False], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
-    d2d_veh_stats['perc_inc_sh_smallest'] = pivot_result.apply(lambda row: row.expected_income_1[False] if (row.ptcp_0[False] >= row.ptcp_1[False]) else row.expected_income_0[False], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
     d2d_veh_stats[['new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']] = d2d_veh_reset.groupby(['repl', 'day'])[count_indicators].sum()[['new_regist_sh_0', 'new_deregist_sh_0', 'new_regist_sh_1', 'new_deregist_sh_1', 'new_regist_mh', 'new_deregist_mh']]
 
-    # Save selected results per replication for selected indicators (only single-homing)
-    # select_df = d2d_veh_reset.copy()[['ptcp_0','exp_inc_0', 'registered_0']]
-    # if 'ptcp_1' in d2d_veh_reset.columns:
-    #     cols_1 = d2d_veh_reset.copy()[['ptcp_1','exp_inc_1','registered_1']]
-    #     select_df = pd.concat([select_df,cols_1],axis=1)
-    # else:
-    #     new_columns = {
-    #         'ptcp_1': np.nan,
-    #         'exp_inc_1': np.nan,
-    #         'registered_1': np.nan
-    #     }
-    #     select_df = select_df.assign(**new_columns)
-    # select_df = select_df.groupby(level=['repl', 'day']).agg({'ptcp_0': 'sum', 'ptcp_1': 'sum', 'registered_0': 'sum', 'registered_1': 'sum', 
-    #                                                    'exp_inc_0': 'mean', 'exp_inc_1': 'mean'})
+    # Select winning platform
+    d2d_veh_stats = d2d_veh_stats.reset_index().merge(last_day_df.reset_index(), on='repl', how='left').set_index(['repl', 'day'])      # Merge the d2d_veh_stats with last_day_df to get 'plf_0_winner' for each 'repl'
+    d2d_veh_stats['ptcp_sh_largest'] = d2d_veh_stats.apply(lambda row: row['ptcp_sh_0'] if row['plf_0_winner'] else row['ptcp_sh_1'], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['exp_inc_sh_largest'] = d2d_veh_stats.apply(lambda row: row['exp_inc_sh_0'] if row['plf_0_winner'] else row['exp_inc_sh_1'], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['exp_inc_sh_smallest'] = d2d_veh_stats.apply(lambda row: row['exp_inc_sh_1'] if row['plf_0_winner'] else row['exp_inc_sh_0'], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['perc_inc_sh_largest'] = d2d_veh_stats.apply(lambda row: row['perc_inc_sh_0'] if row['plf_0_winner'] else row['perc_inc_sh_1'], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats['perc_inc_sh_smallest'] = d2d_veh_stats.apply(lambda row: row['perc_inc_sh_1'] if row['plf_0_winner'] else row['perc_inc_sh_0'], axis=1) if any_driver_sh and 'ptcp_1' in pivot_result.columns else np.nan
+    d2d_veh_stats = d2d_veh_stats.drop(columns=['plf_0_winner'])
+
     with open(os.path.join(aggr_scn_path, 'repl_sup_select.pkl'), 'wb') as f:
         pickle.dump(d2d_veh_stats, f)
 
