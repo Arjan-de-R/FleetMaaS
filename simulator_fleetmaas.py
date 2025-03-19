@@ -23,7 +23,7 @@ sys.path.append(FLEETPY_DIR)
 # sys.path.append(MAASSIM_DIR)
 
 from MaaSSim.src_MaaSSim.maassim import Simulator
-from MaaSSim.src_MaaSSim.shared import prep_shared_rides
+# from MaaSSim.src_MaaSSim.shared import prep_shared_rides
 from MaaSSim.src_MaaSSim.utils import get_config, load_G, generate_demand, generate_vehicles, initialize_df, empty_series, \
     slice_space, read_vehicle_positions
 from scipy.optimize import brute
@@ -276,9 +276,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         json.dump(params, json_file)
     
     df_req = inData.requests[['pax_id','origin','destination','treq','dist','ttrav', 'ttrav_bike', 'transitTime', 'waitingTime', 'PTfare', 'through_center']]
-    df_req.rename(columns={'ttrav':'ttrav_car', 'waitingTime': 'PT_waitingTime', 'transitTime': 'PT_ivTime'}, inplace=True)
+    df_req = df_req.rename(columns={'ttrav':'ttrav_car', 'waitingTime': 'PT_waitingTime', 'transitTime': 'PT_ivTime'})
     if 'haver_dist' in inData.requests.columns:
-        df_req['haver_dist'] = inData.requests['haver_dist']
+        df_req.loc[:, 'haver_dist'] = inData.requests['haver_dist']
     df_pax_cols = [x for x in ['VoT','ASC_rs','ASC_pool','ASC_car','ASC_pt','ASC_bike','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming'] if x in inData.passengers.columns]
     df_pax = inData.passengers[df_pax_cols]
     pd.concat([df_req, df_pax], axis=1).to_csv(os.path.join(result_path,'1_pax-properties.csv'))
@@ -315,7 +315,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             if remaining_days == 0: # new credits are assigned
                 inData.passengers['tmc_balance'] = determine_starting_balance(inData, params, credits_per_day)
                 remaining_days = credit_validity
-            inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(params, buy_table_dims, remaining_days, row.tmc_balance), axis=1)
+            inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(params, buy_table_dims, remaining_days, row.tmc_balance, perc_credit_price), axis=1)
             credit_price, satisfied_orders, denied_orders = trading(inData, buy_table_dims)
             # Update credit and monetary balance
             inData.passengers = update_balances(inData, satisfied_orders, denied_orders, credit_price)

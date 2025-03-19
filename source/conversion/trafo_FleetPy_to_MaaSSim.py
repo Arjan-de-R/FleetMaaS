@@ -75,8 +75,12 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
             if 'km occ 0' in plf_kpis.columns:
                 plf_kpis['repos_dist'] = 0
                 plf_kpis['pickup_dist'] = plf_kpis['km occ 0']
-            
-        aggr_kpis = pd.concat([aggr_kpis, plf_kpis])
+
+        if not plf_kpis.empty and not plf_kpis.isna().all().all():
+            if not aggr_kpis.empty and not aggr_kpis.isna().all().all():
+                aggr_kpis = pd.concat([aggr_kpis, plf_kpis])
+            else:
+                aggr_kpis = plf_kpis.copy()
     
     # Convert object columns to float if possible
     object_cols = aggr_kpis.select_dtypes(include=['object']).columns

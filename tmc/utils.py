@@ -6,6 +6,7 @@ import math
 from FleetPy.src.misc.globals import *
 from FleetPy.src.routing.NetworkTTMatrix import NetworkTTMatrix
 from MaaSSim.src_MaaSSim.d2d_demand import mode_probs
+from scipy.special import erfinv
 
 def trip_credit_cost(inData, params):
     '''Determine credit cost for each mode for travellers' trip itineraries'''
@@ -65,25 +66,10 @@ def establish_buy_quantities(params, value_dict):
     return buy_quant_dict
 
 
-def util_buy(params, balance, price, buy_quant, rem_days, max_balance=np.inf, probabilistic=True):
-    '''Determine utility associated with buying and selling, trading off financial gains/costs and utility of having credits'''
-    value_credit_in_balance = params.tmc.pref_trading.get('balance_util_percept', 1) # util/credit
-    excess_credit_scaling_param = params.tmc.pref_trading.get('excess_credit_param', 1)
 
-    # Determine utility of spent/earned money (opportunity cost) when buying/selling
-    util_cost = np.array([price]).T * buy_quant * params.tmc.pref_trading.get('beta_monetary', -1)
-    # Utility of having additional / fewer credits in balance than before
-    util_orig_balance = value_credit_in_balance * np.log(excess_credit_scaling_param * (balance / rem_days) + 1)
-    util_new_balance = value_credit_in_balance * np.log(excess_credit_scaling_param * ((balance + buy_quant) / rem_days) + 1)
-    util_balance_purchase = util_new_balance - util_orig_balance
-    util_balance_purchase[(-buy_quant > balance) | ((balance + buy_quant) > max_balance)] = np.nan # np.nan for infeasbile quantities (selling more than balance or buying over allowed balance)
-    net_util_buy = util_balance_purchase + util_cost
-    if probabilistic:
-        std_dev_error_term = np.sqrt((np.pi**2) / 6)
-        error_terms = np.random.normal(loc=0, scale=std_dev_error_term, size=net_util_buy.shape[1])
-        net_util_buy = net_util_buy + error_terms
 
-    return net_util_buy
+
+
 
 
 def buy_table_dimensions(params):
@@ -137,7 +123,7 @@ def trading(inData, value_dict):
         satisfy_net_buy_quant[satisfy_net_buy_quant < 0] = 0
         remaining_buy_quant = buy_orders.sum()
         # Satisfy sell orders from large to small (as long as credits are available)
-        for index, value in sell_orders.iteritems():
+        for index, value in sell_orders.items():
             assert remaining_buy_quant >= 0
             if remaining_buy_quant == 0:
                 break
@@ -151,7 +137,7 @@ def trading(inData, value_dict):
         satisfy_net_buy_quant[satisfy_net_buy_quant > 0] = 0
         remaining_sell_quant = abs(sell_orders).sum()
         # Satisfy buy orders from large to small (as long as credits are available)
-        for index, value in buy_orders.iteritems():
+        for index, value in buy_orders.items():
             assert remaining_sell_quant >= 0
             if remaining_sell_quant == 0:
                 break
@@ -191,14 +177,103 @@ def save_tmc_market_indicators(inData, result_path, day, credit_price, satisfied
     return 0
 
 
-def order_per_price(params, value_dict, rem_days, credit_balance):
-    '''Determine a traveller's buy/sell order for each possible credit price depending on their balance and time left to spend credits'''
+def order_per_price(params, value_dict, rem_days, credit_balance, expected_price):
+    # Load regression-based order function if specifically specified, otherwise utility-based order function
+    if params.tmc.pref_trading.get('method', False) == "regression":
+        order_func = order_per_price_regression
+        if expected_price == None:
+            expected_price = value_dict['price']  # on the first day, the expected price is the current price
+        return order_func(params, value_dict, rem_days, credit_balance, expected_price)
+    else:
+        order_func = order_per_price_util
+        return order_func(params, value_dict, rem_days, credit_balance)
+
+    
+
+
+def order_per_price_util(params, value_dict, rem_days, credit_balance):
+    '''Determine a traveller's buy/sell order for each possible credit price depending on their balance and time left to spend credits, using utility of money and balance'''
+
+    def util_buy(params, balance, price, buy_quant, rem_days, max_balance=np.inf, probabilistic=True):
+        '''Determine utility associated with buying and selling, trading off financial gains/costs and utility of having credits'''
+        value_credit_in_balance = params.tmc.pref_trading.get('balance_util_percept', 1) # util/credit
+        excess_credit_scaling_param = params.tmc.pref_trading.get('excess_credit_param', 1)
+
+        # Determine utility of spent/earned money (opportunity cost) when buying/selling
+        util_cost = np.array([price]).T * buy_quant * params.tmc.pref_trading.get('beta_monetary', -1)
+        # Utility of having additional / fewer credits in balance than before
+        util_orig_balance = value_credit_in_balance * np.log(excess_credit_scaling_param * (balance / rem_days) + 1)
+        util_new_balance = value_credit_in_balance * np.log(excess_credit_scaling_param * ((balance + buy_quant) / rem_days) + 1)
+        util_balance_purchase = util_new_balance - util_orig_balance
+        util_balance_purchase[(-buy_quant > balance) | ((balance + buy_quant) > max_balance)] = np.nan # np.nan for infeasbile quantities (selling more than balance or buying over allowed balance)
+        net_util_buy = util_balance_purchase + util_cost
+        if probabilistic:
+            std_dev_error_term = np.sqrt((np.pi**2) / 6)
+            error_terms = np.random.normal(loc=0, scale=std_dev_error_term, size=net_util_buy.shape[1])
+            net_util_buy = net_util_buy + error_terms
+
+        return net_util_buy
 
     if rem_days > 0:
         max_balance = np.max(value_dict['balance'])
         util_buy_price_quant = util_buy(params, credit_balance, value_dict['price'], value_dict['quantity'], rem_days, max_balance=max_balance) # observed utility
         max_indices = np.nanargmax(util_buy_price_quant, axis=1)
         quantity = value_dict['quantity'][max_indices]
+    else:
+        quantity = np.zeros(len(value_dict['price']))
+
+    return quantity
+
+  
+def order_per_price_regression(params, value_dict, rem_days, credit_balance, expected_price, ever_bought=False, ever_sold=False):
+    """
+    Determine a traveller's buy/sell order for each possible credit price depending on their balance and time left to spend credits, using regression
+    
+    Parameters:
+    - params: parameters of the simulation, including regression function type and coefficients
+    - value_dict: dictionary with balance, price and quantity values    
+    - rem_days: remaining days of the TMC period
+    - credit_balance: current credit balance of the traveller
+    - expected_price: expected price of the credit (from past prices)
+    - ever_bought: boolean indicating whether the traveller has ever bought credits before
+    - ever_sold: boolean indicating whether the traveller has ever sold credits before
+
+    Returns:
+    - quantity: buy/sell order for each possible credit price
+    """
+
+    def linear_regression():
+        quantity = beta_constant + beta_balance * (credit_balance - reference_balance) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold)
+
+        return quantity
+    
+    def logarithmic_regression():
+        transformed_quant = beta_constant + beta_balance * (np.log(credit_balance) - np.log(reference_balance)) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold)
+        quantity = np.exp(transformed_quant) - 1 if transformed_quant > 0 else -np.exp(-transformed_quant) - 1
+
+        return quantity
+
+    if rem_days > 0:
+        beta_constant = params.tmc.pref_trading.regression.get('constant', 0)
+        beta_balance = params.tmc.pref_trading.regression.get('balance', 0)
+        beta_price = params.tmc.pref_trading.regression.get('price', 0)
+        beta_days = params.tmc.pref_trading.regression.get('days', 0)
+        beta_hist_buy = params.tmc.pref_trading.regression.get('hist_buy', 0)
+        beta_hist_sell = params.tmc.pref_trading.regression.get('hist_sell', 0)
+        regression_type = params.tmc.pref_trading.regression.get('type', 'linear')
+
+        reference_balance = rem_days * params.tmc.allocated_credits_per_day
+        if regression_type == 'linear':
+            quantity = linear_regression()
+        elif regression_type == 'logarithmic':
+            quantity = logarithmic_regression()
+        else:   
+            raise ValueError("Regression type not supported")
+        
+        max_balance = np.max(value_dict['balance'])
+        quantity[(credit_balance + quantity > max_balance)] = max_balance - credit_balance # buy as much as possible without exceeding maximum balance if you would like to buy more
+        quantity[(-quantity > credit_balance)] = credit_balance # sell all available credits if you would like to sell more than your balance
+
     else:
         quantity = np.zeros(len(value_dict['price']))
 
@@ -253,8 +328,39 @@ def util_alt_modes_tmc(params):
     "determine utility of alternative modes for group of travellers"
     prefs = params.evol.travellers.mode_pref
 
-    # Draw Value of Time and corresponding beta's for travellers
-    vot = np.random.lognormal(mean=prefs.ivt_mean_lognorm, sigma=prefs.ivt_sigma_lognorm, size=params.nP) * (-1) / prefs.beta_cost * 60  # VoT in euro/h
+    def vot_from_income():
+        "determine travellers' income and convert to Value of Time"
+        mean_income = params.evol.travellers.get('mean_income', 30000)  # mean annual income in euro
+        gini_income = prefs.get('gini', 0.3)  # Gini coefficient of the income distribution
+
+        # Draw income of travellers based on lognormal distribution
+        lognorm_std = 2 * erfinv(gini_income)
+        lognorm_mean = np.log(mean_income) - (lognorm_std ** 2) / 2
+        income = np.random.lognormal(lognorm_mean, lognorm_std, params.nP)  # euro/h
+
+        # Parameters for converting income to VoT
+        beta = params.evol.travellers.get('baseline_log_VoT', 0)      # Baseline log VoT
+        gamma = params.evol.travellers.get('income_elasticity', 0.25)  # Income elasticity of VoT
+        sigma = params.evol.travellers.get('random_var_income', 1)     # Random variation
+
+        # Generate normal-distributed random variation
+        z = np.random.normal(0, 1, params.nP)
+
+        # Compute VoT using the log-log model
+        log_VoT = beta + gamma * np.log(income) + sigma * z
+        VoT = np.exp(log_VoT)  # Convert back from log scale
+
+        return income, VoT
+
+    vot_determination = params.evol.travellers.get('vot_determination', 'direct')  # direct vot determination based on distribution or from income
+    if vot_determination == 'direct':
+        # Draw Value of Time and corresponding beta's for travellers
+        vot = np.random.lognormal(mean=prefs.ivt_mean_lognorm, sigma=prefs.ivt_sigma_lognorm, size=params.nP) * (-1) / prefs.beta_cost * 60  # VoT in euro/h
+        income = None
+    elif vot_determination == 'from_income':
+        income, vot = vot_from_income()
+    else:
+        raise ValueError("Invalid method for Value of Time determination")
 
     # Draw mode preferences (ASCs) for travellers
     ASC_car = np.random.normal(prefs.ASC_car, prefs.ASC_car_sd, params.nP)
@@ -268,7 +374,7 @@ def util_alt_modes_tmc(params):
 
     ASCs = pd.DataFrame({'bike': ASC_bike, 'car': ASC_car, 'pt': ASC_pt})
     
-    return ASCs, vot
+    return income, ASCs, vot
 
 
 def prefs_travs_tmc(inData, params):
@@ -276,11 +382,13 @@ def prefs_travs_tmc(inData, params):
     prefs = params.evol.travellers.mode_pref
     passengers = inData.passengers
 
-    ASCs, vot = util_alt_modes_tmc(params)
+    income, ASCs, vot = util_alt_modes_tmc(params)
     passengers['ASC_bike'] = ASCs.bike
     passengers['ASC_car'] = ASCs.car
     passengers['ASC_pt'] = ASCs.pt
 
+    if income is not None:
+        passengers['income'] = income
     passengers['VoT'] = vot
     
     passengers['ASC_rs'] = np.random.normal(prefs.ASC_rs, prefs.ASC_rs_sd,len(inData.passengers))
@@ -364,7 +472,7 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
         if mode == 'rs':
             df['U_rs_plf'] = utils[mode]
             df['U_rs_plf'] = df.apply(lambda row: row.U_rs_plf * unregist_to_nan(row.registered), axis=1) # only keep utility of platforms one is registered with
-            df['prob_plf'] = df.apply(lambda row: np.array([(np.exp(row.U_rs_plf[plf]) / np.exp(row.U_rs_plf).sum()) for plf in inData.platforms.index]), axis=1)
+            df['prob_plf'] = df.apply(lambda row: np.array([(np.exp(row.U_rs_plf[plf]) / np.exp(row.U_rs_plf).sum()) if np.exp(row.U_rs_plf).sum() != 0 else 0 for plf in inData.platforms.index]), axis=1)
             df[['U_rs','chosen_plf_index']] = df.apply(lambda row: util_rs_plf(row), axis=1, result_type='expand')
             df['chosen_plf_index'] = df['chosen_plf_index'].astype(int)
             utils[mode] = df['U_rs'].copy()
@@ -537,11 +645,13 @@ def determine_congestion(params, inData, network_name, fp_run_id, fleetpy_dir, f
     wd_eval = pd.read_csv(os.path.join(result_dir,'standard_eval.csv'))
     plf_0_dist = wd_eval[wd_eval['Unnamed: 0'] == 'total vkm']['MoD_0'].values[0] * 1000
     plf_0_speed = wd_eval[wd_eval['Unnamed: 0'] == 'avg driving velocity [km/h]']['MoD_0'].values[0]
-    plf_0_tt = (plf_0_dist / 1000) / plf_0_speed
+    with np.errstate(divide='ignore', invalid='ignore'):
+        plf_0_tt = np.nan_to_num((plf_0_dist / 1000) / plf_0_speed, nan=0.0, posinf=0.0, neginf=0.0)
     plf_0_tt = 0 if np.isnan(plf_0_tt) else plf_0_tt
     plf_1_dist = wd_eval[wd_eval['Unnamed: 0'] == 'total vkm']['MoD_1'].values[0] * 1000
     plf_1_speed = wd_eval[wd_eval['Unnamed: 0'] == 'avg driving velocity [km/h]']['MoD_1'].values[0]
-    plf_1_tt = (plf_1_dist / 1000) / plf_1_speed
+    with np.errstate(divide='ignore', invalid='ignore'):
+        plf_1_tt = np.nan_to_num((plf_1_dist / 1000) / plf_1_speed, nan=0.0, posinf=0.0, neginf=0.0)
     plf_1_tt = 0 if np.isnan(plf_1_tt) else plf_1_tt
     car_dist = ((inData.passengers.mode_day == 'car') * inData.requests.dist).sum()
     car_tt = ((inData.passengers.mode_day == 'car') * inData.requests.ttrav).sum().seconds / 3600

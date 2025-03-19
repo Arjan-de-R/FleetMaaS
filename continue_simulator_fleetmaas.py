@@ -22,7 +22,7 @@ sys.path.append(FLEETPY_DIR)
 # sys.path.append(MAASSIM_DIR)
 
 from MaaSSim.src_MaaSSim.maassim import Simulator
-from MaaSSim.src_MaaSSim.shared import prep_shared_rides
+# from MaaSSim.src_MaaSSim.shared import prep_shared_rides
 from MaaSSim.src_MaaSSim.utils import get_config, load_G, generate_demand, generate_vehicles, initialize_df, empty_series, \
     slice_space, read_vehicle_positions
 from scipy.optimize import brute

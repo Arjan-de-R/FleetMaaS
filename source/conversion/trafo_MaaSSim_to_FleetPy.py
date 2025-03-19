@@ -55,13 +55,13 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     if not f_df.empty: # at least one traveller opts for ride-hailing
         f_df['start'] = f_df['origin'].apply(lambda x: source_to_node_id[x])
         f_df['end'] = f_df['destination'].apply(lambda x: source_to_node_id[x])
-        fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]]
+        fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]].copy()
         fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
-        fpy_rq_df["platforms"] = fpy_rq_df["platforms"].apply(platform_data_conversion)
+        fpy_rq_df["platforms"] = fpy_rq_df["platforms"].astype(str).apply(platform_data_conversion)
     else:
-        fpy_rq_df = pd.DataFrame(columns=["rq_id", "rq_time", "treq", "start", "end", "platforms", "VoT"])
-    fpy_rq_df.rename({"rq_id": "request_id", "VoT": "value_of_time", "platforms" : "user_list_operators"}, axis=1, inplace=True) # rename
-    fpy_rq_df.sort_values("rq_time", inplace=True)
+        fpy_rq_df = pd.DataFrame(columns=["rq_id", "rq_time", "treq", "start", "end", "platforms", "VoT"]).copy()
+    fpy_rq_df = fpy_rq_df.rename({"rq_id": "request_id", "VoT": "value_of_time", "platforms" : "user_list_operators"}, axis=1) # rename
+    fpy_rq_df = fpy_rq_df.sort_values("rq_time")
 
     fpy_rq_f = os.path.join(fleetpy_dir, "data", "demand", demand_name)
     if not os.path.isdir(fpy_rq_f):
