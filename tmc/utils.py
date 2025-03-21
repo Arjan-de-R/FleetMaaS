@@ -12,9 +12,9 @@ def trip_credit_cost(inData, params):
     '''Determine credit cost for each mode for travellers' trip itineraries'''
 
     # Modes other than ridesourcing
-    inData.requests['bike_credit'] = params.tmc.credit_mode.bike.base + inData.requests.dist_bike / 1000 * params.tmc.credit_mode.bike.dist
-    inData.requests['car_credit'] = params.tmc.credit_mode.car.base + inData.requests.dist / 1000 * (params.tmc.credit_mode.car.dist + params.tmc.credit_mode.car.get('dist_add_center', 0) * inData.requests.through_center)
-    inData.requests['pt_credit'] = params.tmc.credit_mode.pt.base + inData.requests.PTdistance / 1000 * params.tmc.credit_mode.pt.dist
+    inData.requests['bike_credit'] = (params.tmc.credit_mode.bike.base + inData.requests.dist_bike / 1000 * params.tmc.credit_mode.bike.dist).round()
+    inData.requests['car_credit'] = (params.tmc.credit_mode.car.base + inData.requests.dist / 1000 * (params.tmc.credit_mode.car.dist + params.tmc.credit_mode.car.get('dist_add_center', 0) * inData.requests.through_center)).round()
+    inData.requests['pt_credit'] = (params.tmc.credit_mode.pt.base + inData.requests.PTdistance / 1000 * params.tmc.credit_mode.pt.dist).round()
     
     def rs_plf_credit(req_dist, service_type, through_center):
         '''determine required credits for solo and pooling trip for a given trip request'''
@@ -26,7 +26,7 @@ def trip_credit_cost(inData, params):
         return trip_credit
 
     # Ridesourcing, depending on solo or pooling
-    inData.requests['rs_credit'] = inData.requests.apply(lambda row: np.array([rs_plf_credit(row.dist, params.platforms.service_types[plat_id], row.through_center) for plat_id in range(0,len(params.platforms.service_types))]), axis=1)
+    inData.requests['rs_credit'] = inData.requests.apply(lambda row: np.array([rs_plf_credit(row.dist, params.platforms.service_types[plat_id], row.through_center) for plat_id in range(0,len(params.platforms.service_types))]).round(decimals=0), axis=1)
 
     return inData.requests
 
@@ -66,12 +66,6 @@ def establish_buy_quantities(params, value_dict):
     return buy_quant_dict
 
 
-
-
-
-
-
-
 def buy_table_dimensions(params):
     '''Determine which values are included in the table with quantities depending on price and credit balance'''
     min_price_step = params.tmc.price.get('step', 0.01)
@@ -84,7 +78,7 @@ def buy_table_dimensions(params):
 
     # Determine dimensions of database: balance quantities and credit price levels
     balance_values = np.arange(0, max_balance + min_balance_step, min_balance_step)
-    price_values = np.arange(params.tmc.price.get('min',0), params.tmc.price.get('max', 10) + min_price_step, min_price_step)
+    price_values = np.arange(params.tmc.price.get('min',0.01), params.tmc.price.get('max', 10) + min_price_step, min_price_step)
     buy_values = np.arange(-max_buy_quant,max_buy_quant+1)
     remaining_day_values = np.arange(1,params.tmc.duration+1)
     value_dict = {'balance': balance_values, 'price': price_values, 'quantity': buy_values, 'days': remaining_day_values}
@@ -177,21 +171,28 @@ def save_tmc_market_indicators(inData, result_path, day, credit_price, satisfied
     return 0
 
 
-def order_per_price(params, value_dict, rem_days, credit_balance, expected_price):
+def order_per_price(pax, params, value_dict, rem_days, expected_price):
     # Load regression-based order function if specifically specified, otherwise utility-based order function
     if params.tmc.pref_trading.get('method', False) == "regression":
         order_func = order_per_price_regression
         if expected_price == None:
-            expected_price = value_dict['price']  # on the first day, the expected price is the current price
-        return order_func(params, value_dict, rem_days, credit_balance, expected_price)
+            expected_price = value_dict['price']  # on the first day, if there is no price expectation, the expected price is the current price
+        quantity = order_func(pax, params, value_dict, rem_days, expected_price)
     else:
         order_func = order_per_price_util
-        return order_func(params, value_dict, rem_days, credit_balance)
+        quantity = order_func(pax, params, value_dict, rem_days)
 
-    
+    # Ensure that no credits are sold when price equals 0
+    zero_price_index = np.where(value_dict['price'] == 0)[0]
+    if len(zero_price_index) > 0:
+        zero_price_index = zero_price_index[0]
+        if quantity[zero_price_index] < 0:
+            quantity[zero_price_index] = 0
+
+    return quantity
 
 
-def order_per_price_util(params, value_dict, rem_days, credit_balance):
+def order_per_price_util(pax, params, value_dict, rem_days):
     '''Determine a traveller's buy/sell order for each possible credit price depending on their balance and time left to spend credits, using utility of money and balance'''
 
     def util_buy(params, balance, price, buy_quant, rem_days, max_balance=np.inf, probabilistic=True):
@@ -214,6 +215,8 @@ def order_per_price_util(params, value_dict, rem_days, credit_balance):
 
         return net_util_buy
 
+    credit_balance = pax.tmc_balance
+
     if rem_days > 0:
         max_balance = np.max(value_dict['balance'])
         util_buy_price_quant = util_buy(params, credit_balance, value_dict['price'], value_dict['quantity'], rem_days, max_balance=max_balance) # observed utility
@@ -225,7 +228,7 @@ def order_per_price_util(params, value_dict, rem_days, credit_balance):
     return quantity
 
   
-def order_per_price_regression(params, value_dict, rem_days, credit_balance, expected_price, ever_bought=False, ever_sold=False):
+def order_per_price_regression(pax, params, value_dict, rem_days, expected_price, ever_bought=False, ever_sold=False):
     """
     Determine a traveller's buy/sell order for each possible credit price depending on their balance and time left to spend credits, using regression
     
@@ -243,28 +246,51 @@ def order_per_price_regression(params, value_dict, rem_days, credit_balance, exp
     """
 
     def linear_regression():
-        quantity = beta_constant + beta_balance * (credit_balance - reference_balance) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold)
+        quantity = beta_constant + beta_balance * (credit_balance - reference_balance) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold) + error_term
+
+        return quantity
+    
+    def linear_regression_expected_usage():
+        '''linear regression but based on expected credit usage'''
+        credit_balance_per_day = credit_balance / rem_days
+        quantity = beta_constant + beta_balance * (credit_balance_per_day - pax.expected_credit_usage) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold) + error_term
 
         return quantity
     
     def logarithmic_regression():
-        transformed_quant = beta_constant + beta_balance * (np.log(credit_balance) - np.log(reference_balance)) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold)
+        transformed_quant = beta_constant + beta_balance * (np.log(credit_balance) - np.log(reference_balance)) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold) + error_term
         quantity = np.exp(transformed_quant) - 1 if transformed_quant > 0 else -np.exp(-transformed_quant) - 1
 
         return quantity
+    
+    # def linear_regression_price_factor():
+    #     '''linear regression but based on price factor relative to expectation, instead of price difference with expectation'''
+    #     price_factor = value_dict['price'] / expected_price
+    #     price_factor = 1 / price_factor if price_factor < 1 else price_factor  # 5 means, 5 times more expensive than expectation, -5 means 5 times cheaper
+    #     quantity = beta_constant + beta_balance * (credit_balance - reference_balance) + beta_price * price_factor + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold) + error_term
+
+    #     # what if perc price is zero
+    #     quantity = beta_constant + beta_balance * (credit_balance - reference_balance) + beta_price * (value_dict['price'] / expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold) + error_term
+    #     return 0
 
     if rem_days > 0:
-        beta_constant = params.tmc.pref_trading.regression.get('constant', 0)
-        beta_balance = params.tmc.pref_trading.regression.get('balance', 0)
-        beta_price = params.tmc.pref_trading.regression.get('price', 0)
-        beta_days = params.tmc.pref_trading.regression.get('days', 0)
-        beta_hist_buy = params.tmc.pref_trading.regression.get('hist_buy', 0)
-        beta_hist_sell = params.tmc.pref_trading.regression.get('hist_sell', 0)
-        regression_type = params.tmc.pref_trading.regression.get('type', 'linear')
-
+        credit_balance = pax.tmc_balance
         reference_balance = rem_days * params.tmc.allocated_credits_per_day
+        regression_type = params.tmc.pref_trading.get('regression_type', 'linear')
+        error_term = np.random.normal(0, params.tmc.pref_trading.get('sd_error_term', 0))
+
+        beta_constant = pax.get('beta_constant', params.tmc.pref_trading.get('beta_constant', 0))
+        beta_balance = pax.get('beta_balance', params.tmc.pref_trading.get('beta_balance', 0))
+        beta_price = pax.get('beta_price', params.tmc.pref_trading.get('beta_price', 0))
+        beta_days = pax.get('beta_days', params.tmc.pref_trading.get('beta_days', 0))
+        beta_hist_buy = pax.get('beta_hist_buy', params.tmc.pref_trading.get('beta_hist_buy', 0))
+        beta_hist_sell = pax.get('beta_hist_sell', params.tmc.pref_trading.get('beta_hist_sell', 0))
+
         if regression_type == 'linear':
-            quantity = linear_regression()
+            if pax.get('expected_credit_usage', None) is None:
+                quantity = linear_regression()
+            else:
+                quantity = linear_regression_expected_usage()
         elif regression_type == 'logarithmic':
             quantity = logarithmic_regression()
         else:   
@@ -272,7 +298,8 @@ def order_per_price_regression(params, value_dict, rem_days, credit_balance, exp
         
         max_balance = np.max(value_dict['balance'])
         quantity[(credit_balance + quantity > max_balance)] = max_balance - credit_balance # buy as much as possible without exceeding maximum balance if you would like to buy more
-        quantity[(-quantity > credit_balance)] = credit_balance # sell all available credits if you would like to sell more than your balance
+        quantity[(-quantity > credit_balance)] = -credit_balance # sell all available credits if you would like to sell more than your balance
+        quantity = np.round(quantity, decimals=0) # ensure integer order quantities
 
     else:
         quantity = np.zeros(len(value_dict['price']))
@@ -324,8 +351,8 @@ def init_networktt_fp_class(params):
     return nw
 
 
-def util_alt_modes_tmc(params):
-    "determine utility of alternative modes for group of travellers"
+def ASCs_and_economic_attributes(params):
+    "determine properties of alternative modes for group of travellers"
     prefs = params.evol.travellers.mode_pref
 
     def vot_from_income():
@@ -382,7 +409,7 @@ def prefs_travs_tmc(inData, params):
     prefs = params.evol.travellers.mode_pref
     passengers = inData.passengers
 
-    income, ASCs, vot = util_alt_modes_tmc(params)
+    income, ASCs, vot = ASCs_and_economic_attributes(params)
     passengers['ASC_bike'] = ASCs.bike
     passengers['ASC_car'] = ASCs.car
     passengers['ASC_pt'] = ASCs.pt
@@ -401,8 +428,8 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     "determine the mode at the start of a day for a pool of travellers (if they are single-homing yet possibly registered with more than 1 platform and still have to choose)"
     requests = inData.requests
     passengers = inData.passengers
-    prefs = params.evol.travellers.mode_pref
-    props = params.alt_modes
+    df = passengers.copy()
+    df['tmc_balance'] = df.tmc_balance if params.dem_mgmt == 'tmc' else 0
     credit_price = kwargs.get('credit_price')
     perc_credit_price = kwargs.get('perc_credit_price', None)
     perc_congest_factor = kwargs.get('perc_congest_factor', 1)
@@ -410,6 +437,91 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     utils = {}
 
     ## Establish attributes in mode choice for each mode
+    mode_attr = mode_attributes(params, requests, passengers, inData, perc_congest_factor, mode_attr)
+
+    # Determine utility of each mode
+    for mode in ['bike', 'car', 'pt', 'rs']:
+        utils[mode] = util_mode(params, passengers, mode_attr[mode], df, credit_price, perc_credit_price=perc_credit_price) # utils if credit balance was not a constraint
+        utils[mode] = apply_insufficient_balance(utils[mode], mode_attr[mode]['credits'], df.tmc_balance, mode) # utils considering one's credit balance
+        if mode == 'rs':
+            utils[mode], chosen_plf = choose_ridehailing_platform(inData, df, utils[mode])
+        if mode == 'car' and params.dem_mgmt == 'lpr': # license plate rationing - cars allowed to drive on odd / even days
+            utils[mode] = apply_license_plate_rationing(inData, utils[mode], kwargs)
+    utils_df = pd.DataFrame.from_dict(utils)
+
+    ## MODE CHOICE
+    probabilities = mode_probs(utils_df)
+    cuml = probabilities.cumsum(axis=1)
+    draw = cuml.gt(np.random.random(len(passengers)),axis=0) * 1
+    probabilities['decis'] = draw.idxmax(axis="columns")
+    probabilities['pref_rs_plf'] = chosen_plf
+
+    df['U_bike'] = utils['bike']
+    df['U_car'] = utils['car']
+    df['U_pt'] = utils['pt']
+    if params.dem_mgmt == 'tmc':
+        # opt out if not enough credit to travel (for any mode)
+        probabilities['insuff_credit'] = df.apply(lambda row: (row.U_bike == -math.inf) and (row.U_car == -math.inf) and (row.U_pt == -math.inf) and (row.U_rs == -math.inf), axis=1)
+        probabilities['decis'] = probabilities.apply(lambda row: "not_enough_credit" if row.insuff_credit else row.decis, axis=1)
+
+    probabilities['decis'] = probabilities.apply(lambda row: row.decis + '_' + str(row.pref_rs_plf) if row.decis == 'rs' else row.decis, axis=1)
+    passengers['mode_day'] = probabilities.decis
+
+    passengers['U_bike'] = utils['bike']
+    passengers['U_car'] = utils['car']
+    passengers['U_pt'] = utils['pt']
+    
+    requests['chosen_mode_perc_gtt'] = return_gtt_chosen_mode(passengers, mode_attr)
+
+    return passengers, requests
+
+
+def determine_expected_credit_usage(inData, params, **kwargs):
+    "determine the expected credit usage based on the probability of choosing each mode for the expected credit price"
+    requests = inData.requests
+    passengers = inData.passengers
+    df = passengers.copy()
+    df['tmc_balance'] = df.tmc_balance if params.dem_mgmt == 'tmc' else 0
+    perc_credit_price = kwargs.get('perc_credit_price', 0)
+    perc_credit_price = 0 if perc_credit_price is None else perc_credit_price
+    credit_price = perc_credit_price
+    perc_congest_factor = kwargs.get('perc_congest_factor', 1)
+    mode_attr = {}
+    utils = {}
+
+    ## Establish attributes in mode choice for each mode
+    mode_attr = mode_attributes(params, requests, passengers, inData, perc_congest_factor, mode_attr)
+
+    # Determine utility of each mode
+    for mode in ['bike', 'car', 'pt', 'rs']:
+        utils[mode] = util_mode(params, passengers, mode_attr[mode], df, credit_price, perc_credit_price=perc_credit_price) # utils if credit balance was not a constraint
+        # utils[mode] = apply_insufficient_balance(unconstrained_utils[mode], mode_attr[mode]['credits'], df.tmc_balance, mode) # utils considering one's credit balance
+        if mode == 'rs':
+            utils[mode], chosen_plf = choose_ridehailing_platform(inData, df, utils[mode])
+    utils_df = pd.DataFrame.from_dict(utils)
+
+    ## Expected credit usage
+    probabilities = mode_probs(utils_df)
+    mode_credit_costs_df = pd.DataFrame({
+        'bike': mode_attr['bike']['credits'],
+        'car': mode_attr['car']['credits'],
+        'pt': mode_attr['pt']['credits'],
+        'rs': mode_attr['rs']['credits']
+    }, index=passengers.index)
+    mode_credit_costs_df['chosen_plf'] = chosen_plf
+    mode_credit_costs_df['rs_credit_cost'] = mode_credit_costs_df.apply(lambda row: row.rs[row.chosen_plf], axis=1)
+    mode_credit_costs_df = mode_credit_costs_df.drop(columns=['rs', 'chosen_plf']).rename(columns={'rs_credit_cost': 'rs'})
+    expected_credit_usage = (probabilities * mode_credit_costs_df).sum(axis=1)
+
+    return expected_credit_usage
+
+
+def mode_attributes(params, requests, passengers, inData, perc_congest_factor, mode_attr):
+    ''' Determine the attributes (time, cost, etc.) of all modes'''
+    prefs = params.evol.travellers.mode_pref
+    props = params.alt_modes
+    df = passengers.copy()
+    
     # Bike
     mode_attr['bike'] = {}
     mode_attr['bike']['gtt'] = requests.ttrav_bike.dt.total_seconds() * prefs.bike_multip
@@ -444,7 +556,6 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
         mode_attr['pt']['constant'] = passengers.ASC_pt
         mode_attr['pt']['credits'] = requests.pt_credit if params.dem_mgmt == 'tmc' else 0
     # Ride-hailing
-    df = passengers.copy()
     mode_attr['rs'] = {}
     if params.dem_mgmt == 'cgp':
         congestion_charge = []
@@ -459,55 +570,19 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
         mode_attr['rs'] = rs_attr_tmc(inData, params, df.expected_wait * perc_congest_factor, df.expected_ivt * perc_congest_factor, df.expected_km_fare, inData.requests.dist)
     mode_attr['rs']['credits'] = requests.rs_credit.copy() if params.dem_mgmt == 'tmc' else 0
 
-    # Determine utility of each mode
-    for mode in ['bike', 'car', 'pt', 'rs']:
-        df['tmc_balance'] = df.tmc_balance if params.dem_mgmt == 'tmc' else 0
-        if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary":    # convert credit charge to monetary costs
-            if params.dem_mgmt != "tmc":
-                perc_credit_price = 0
-            utils[mode] = util_credit_to_cost(params, mode_attr[mode], perc_credit_price, passengers.VoT)
-        else: # credit costs perceived separately in utility
-            utils[mode] = util_credit_time(params, mode_attr[mode], credit_price, df.tmc_balance, passengers.VoT)
-        utils[mode] = apply_insufficient_balance(utils[mode], mode_attr[mode]['credits'], df.tmc_balance, mode)
-        if mode == 'rs':
-            df['U_rs_plf'] = utils[mode]
-            df['U_rs_plf'] = df.apply(lambda row: row.U_rs_plf * unregist_to_nan(row.registered), axis=1) # only keep utility of platforms one is registered with
-            df['prob_plf'] = df.apply(lambda row: np.array([(np.exp(row.U_rs_plf[plf]) / np.exp(row.U_rs_plf).sum()) if np.exp(row.U_rs_plf).sum() != 0 else 0 for plf in inData.platforms.index]), axis=1)
-            df[['U_rs','chosen_plf_index']] = df.apply(lambda row: util_rs_plf(row), axis=1, result_type='expand')
-            df['chosen_plf_index'] = df['chosen_plf_index'].astype(int)
-            utils[mode] = df['U_rs'].copy()
-        if mode == 'car' and params.dem_mgmt == 'lpr': # license plate rationing - cars allowed to drive on odd / even days
-            day = kwargs.get('day', None)
-            odd_day = ((day % 2) != 0)
-            allowed_to_drive = inData.passengers.odd_license if odd_day else ~inData.passengers.odd_license
-            utils[mode][~allowed_to_drive] = -math.inf
-    utils_df = pd.DataFrame.from_dict(utils)
+    return mode_attr
 
-    ## ACTUAL MODE CHOICE
-    probabilities = mode_probs(utils_df)
-    cuml = probabilities.cumsum(axis=1)
-    draw = cuml.gt(np.random.random(len(passengers)),axis=0) * 1
-    probabilities['decis'] = draw.idxmax(axis="columns")
-    probabilities['pref_rs_plf'] = df.chosen_plf_index.copy()
 
-    df['U_bike'] = utils['bike']
-    df['U_car'] = utils['car']
-    df['U_pt'] = utils['pt']
-    if params.dem_mgmt == 'tmc':
-        # opt out if not enough credit to travel (for any mode)
-        probabilities['insuff_credit'] = df.apply(lambda row: (row.U_bike == -math.inf) and (row.U_car == -math.inf) and (row.U_pt == -math.inf) and (row.U_rs == -math.inf), axis=1)
-        probabilities['decis'] = probabilities.apply(lambda row: "not_enough_credit" if row.insuff_credit else row.decis, axis=1)
+def util_mode(params, passengers, mode_attr, tmc_balance, credit_price, perc_credit_price=None):
+    '''Determine the utility of an invidual mode'''
+    if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary":    # convert credit charge to monetary costs
+        if params.dem_mgmt != "tmc":
+            perc_credit_price = 0
+        mode_util = util_credit_to_cost(params, mode_attr, perc_credit_price, passengers.VoT)
+    else: # credit costs perceived separately in utility
+        mode_util = util_credit_time(params, mode_attr, credit_price, tmc_balance, passengers.VoT)
 
-    probabilities['decis'] = probabilities.apply(lambda row: row.decis + '_' + str(row.pref_rs_plf) if row.decis == 'rs' else row.decis, axis=1)
-    passengers['mode_day'] = probabilities.decis
-
-    passengers['U_bike'] = utils['bike']
-    passengers['U_car'] = utils['car']
-    passengers['U_pt'] = utils['pt']
-    
-    requests['chosen_mode_perc_gtt'] = return_gtt_chosen_mode(passengers, mode_attr)
-
-    return passengers, requests
+    return mode_util
 
 
 def rs_attr_tmc(inData, params, rs_wait, rs_ivt, rs_km_fare, rs_dist, trav_vot=False, trav_ASC=False, congestion_charge=None, through_center=False):
@@ -727,3 +802,56 @@ def determine_starting_balance(inData, params, credits_per_day):
         tmc_balance = vot_class.map(lambda x: credits_per_day[x] * params.tmc.get('duration', 25))
 
     return tmc_balance
+
+
+def set_trading_prefs(passengers, params):
+    '''draws individual trading preferences for travellers from distribution, if specified'''
+    if 'sd_beta_constant' in params.tmc.pref_trading:
+        betas_constant = np.random.normal(params.tmc.pref_trading.get('beta_constant', 0), params.tmc.pref_trading.sd_beta_constant, len(passengers))
+        passengers['beta_constant'] = betas_constant
+    if 'sd_beta_balance' in params.tmc.pref_trading:
+        if params.tmc.pref_trading.get('beta_balance', 0) >= 0:
+            betas_balance = np.random.lognormal(np.log(params.tmc.pref_trading.get('beta_balance', 0)) - params.tmc.pref_trading.sd_beta_balance ** 2 / 2, params.tmc.pref_trading.sd_beta_balance, len(passengers))
+        else:
+            betas_balance = -np.random.lognormal(np.log(-params.tmc.pref_trading.get('beta_balance', 0)) - params.tmc.pref_trading.sd_beta_balance ** 2 / 2, params.tmc.pref_trading.sd_beta_balance, len(passengers))
+        passengers['beta_balance'] = betas_balance
+    if 'sd_beta_price' in params.tmc.pref_trading:
+        if params.tmc.pref_trading.get('beta_price', 0) >= 0:
+            betas_price = np.random.lognormal(np.log(params.tmc.pref_trading.get('beta_price', 0)) - params.tmc.pref_trading.sd_beta_price ** 2 / 2, params.tmc.pref_trading.sd_beta_price, len(passengers))
+        else:
+            betas_price = -np.random.lognormal(np.log(-params.tmc.pref_trading.get('beta_price', 0)) - params.tmc.pref_trading.sd_beta_price ** 2 / 2, params.tmc.pref_trading.sd_beta_price, len(passengers))
+        passengers['beta_price'] = betas_price
+    if 'sd_beta_days' in params.tmc.pref_trading:
+        betas_time = np.random.normal(params.tmc.pref_trading.get('beta_time', 0), params.tmc.pref_trading.sd_beta_days, len(passengers))
+        passengers['beta_time'] = betas_time
+    if 'sd_beta_hist_buy' in params.tmc.pref_trading:
+        betas_hist_buy = np.random.normal(params.tmc.pref_trading.get('beta_hist_buy', 0), params.tmc.pref_trading.sd_beta_hist_buy, len(passengers))
+        passengers['beta_hist_buy'] = betas_hist_buy
+    if 'sd_beta_hist_sell' in params.tmc.pref_trading:
+        betas_hist_sell = np.random.normal(params.tmc.pref_trading.get('beta_hist_sell', 0), params.tmc.pref_trading.sd_beta_hist_sell, len(passengers))
+        passengers['beta_hist_sell'] = betas_hist_sell
+    
+    return passengers
+
+
+def choose_ridehailing_platform(inData, df, rs_util):
+    '''decide which ridehailing platform to choose, and determine overall ridehailing utility following the choice for that platform'''
+    
+    df['U_rs_plf'] = rs_util
+    df['U_rs_plf'] = df.apply(lambda row: row.U_rs_plf * unregist_to_nan(row.registered), axis=1) # only keep utility of platforms one is registered with
+    df['prob_plf'] = df.apply(lambda row: np.array([(np.exp(row.U_rs_plf[plf]) / np.exp(row.U_rs_plf).sum()) if np.exp(row.U_rs_plf).sum() != 0 else 0 for plf in inData.platforms.index]), axis=1)
+    df[['U_rs','chosen_plf_index']] = df.apply(lambda row: util_rs_plf(row), axis=1, result_type='expand')
+    chosen_plf = df['chosen_plf_index'].astype(int).copy()
+    rs_util = df['U_rs'].copy()
+
+    return rs_util, chosen_plf
+
+
+def apply_license_plate_rationing(inData, car_util, kwargs):
+    '''exclude cars from choice set if they are not allowed to drive on this day'''        
+    day = kwargs.get('day', None)
+    odd_day = ((day % 2) != 0)
+    allowed_to_drive = inData.passengers.odd_license if odd_day else ~inData.passengers.odd_license
+    car_util[~allowed_to_drive] = -math.inf
+
+    return car_util

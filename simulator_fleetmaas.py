@@ -189,9 +189,10 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     else:
         inData.passengers = prefs_travs(inData, params)
 
-    # Determine required mobility credits per mode for each trip request
+    # Determine required mobility credits per mode for each trip request, as well as trading perceptions
     if params.dem_mgmt == 'tmc':
         inData.requests = trip_credit_cost(inData, params)
+        inData.passengers = set_trading_prefs(inData.passengers, params)
 
     if not params.get('dem_mgmt'):
         all_req = inData.requests.copy()
@@ -214,7 +215,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.passengers['money_balance'] = 0
         inData.passengers['tot_credit_bought'] = 0
         inData.passengers['tot_credit_sold'] = 0
-        # Establish traveller's buy/sell actions depending on price and credit balance
+        # Establish possible buy/sell actions, i.e. what are possible credit prices, balance values and buy quantities
         buy_table_dims = buy_table_dimensions(params)
         # Initialise remaining days in which credit can be spent
         credit_validity = params.tmc.get('duration', 25)
@@ -291,9 +292,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         del all_pax, all_req, all_pax_df
 
     # Starting (perceived) credit price
-    credit_price = 0
-    if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary":
-        perc_credit_price = None
+    perc_credit_price = params.evol.travellers.tmc.get('perc_credit_price_start', None)
 
     # Starting perception of congestion
     perc_congest_factor = params.congestion.get('start_perc', 1)
@@ -315,7 +314,9 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             if remaining_days == 0: # new credits are assigned
                 inData.passengers['tmc_balance'] = determine_starting_balance(inData, params, credits_per_day)
                 remaining_days = credit_validity
-            inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(params, buy_table_dims, remaining_days, row.tmc_balance, perc_credit_price), axis=1)
+            if params.tmc.pref_trading.get("reference", False) == "perceived_need":
+                inData.passengers['expected_credit_usage'] = determine_expected_credit_usage(inData, params, perc_credit_price=perc_credit_price, perc_congest_factor=perc_congest_factor)
+            inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(row, params, buy_table_dims, remaining_days, perc_credit_price), axis=1)
             credit_price, satisfied_orders, denied_orders = trading(inData, buy_table_dims)
             # Update credit and monetary balance
             inData.passengers = update_balances(inData, satisfied_orders, denied_orders, credit_price)

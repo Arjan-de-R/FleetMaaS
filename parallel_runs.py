@@ -27,10 +27,16 @@ params.evol.travellers.baseline_log_VoT = -2.75      # Baseline log VoT
 params.evol.travellers.income_elasticity = 0.5  # Income elasticity of VoT
 params.evol.travellers.random_var_income = 0.5
 params.tmc.pref_trading.method = "regression"
-params.tmc.pref_trading.regression.constant = 0
-params.tmc.pref_trading.regression.balance = -0.25
-params.tmc.pref_trading.regression.price = -10
-params.tmc.pref_trading.regression.days = 0
+params.tmc.pref_trading.beta_constant = 0
+params.tmc.pref_trading.beta_balance = -1
+params.tmc.pref_trading.beta_price = -30
+params.tmc.pref_trading.beta_days = 0
+params.tmc.pref_trading.sd_beta_constant = 0.3
+params.tmc.pref_trading.sd_beta_balance = 0.3
+params.tmc.pref_trading.sd_beta_price = 0.3
+params.tmc.pref_trading.sd_error_term = 2
+params.tmc.pref_trading.reference = "perceived_need"
+params.evol.travellers.tmc.perc_credit_price_start = 0.25
 
 # params.tmc.beta_monetary = -0.2
 # params.tmc.max_balance = 1000
@@ -73,7 +79,7 @@ def sample_space():
     space.service_types = [['solo', 'pool']]
     # space.dem_mh_share = [0.5]
     # space.sup_mh_share = [0.5]
-    space.repl_id = [0]
+    space.repl_id = [4]
     return space
 
 def determine_n_threads(search_space):
