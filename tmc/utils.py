@@ -77,8 +77,8 @@ def buy_table_dimensions(params):
     max_buy_quant = params.tmc.get('max_buy_day', max_balance)
 
     # Determine dimensions of database: balance quantities and credit price levels
-    balance_values = np.arange(0, max_balance + min_balance_step, min_balance_step)
-    price_values = np.arange(params.tmc.price.get('min',0.01), params.tmc.price.get('max', 10) + min_price_step, min_price_step)
+    balance_values = np.round(np.arange(0, max_balance + min_balance_step, min_balance_step), 1)
+    price_values = np.round(np.arange(params.tmc.price.get('min',0.01), params.tmc.price.get('max', 10) + min_price_step, min_price_step), 2)
     buy_values = np.arange(-max_buy_quant,max_buy_quant+1)
     remaining_day_values = np.arange(1,params.tmc.duration+1)
     value_dict = {'balance': balance_values, 'price': price_values, 'quantity': buy_values, 'days': remaining_day_values}
