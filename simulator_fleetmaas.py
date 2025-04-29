@@ -301,6 +301,13 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     # Starting perception of congestion
     perc_congest_factor = params.congestion.get('start_perc', 1)
 
+    # Starting congestion levels
+    ttf_update_interval = params.congestion.get('update_interval', params.simTime) * 3600
+    t0 = create_seconds_of_day(params.t0)
+    inData.tt_factors = pd.DataFrame(index=range(t0, t0 + params.simTime*3600, ttf_update_interval), columns=['travel_time_factor'])
+    inData.tt_factors['travel_time_factor'] = params.congestion.get('start_ttf', 1)
+    inData.tt_factors.index.name = 'simulation_time'
+
     # Initialise license plate rationing
     if params.dem_mgmt == 'lpr':
         inData.passengers['odd_license'] = (np.random.randint(2, size = inData.passengers.shape[0]) == 1)
@@ -390,7 +397,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
             inData.requests.to_csv(os.path.join(dtd_result_dir,'inData_requests.csv'))
             inData.passengers.to_csv(os.path.join(dtd_result_dir,'inData_passengers.csv')) 
             inData.vehicles.to_csv(os.path.join(dtd_result_dir,'inData_vehicles.csv')) 
-            inData.platforms.to_csv(os.path.join(dtd_result_dir,'inData_platforms.csv')) 
+            inData.platforms.to_csv(os.path.join(dtd_result_dir,'inData_platforms.csv'))
+            inData.tt_factors.to_csv(os.path.join(dtd_result_dir,'inData_ttfs.csv'))  
 
             # FleetPy init: conversion from MaaSSim data structure
             fp_run_id = scn_name + '-day-{}'.format(day) # id in FleetPy

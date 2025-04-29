@@ -851,3 +851,8 @@ def apply_license_plate_rationing(inData, car_util, kwargs):
     car_util[~allowed_to_drive] = -math.inf
 
     return car_util
+
+
+def create_seconds_of_day(dt_str):
+    hour, minute, second =  [int(x) for x in dt_str.split(" ")[1].split(":")]
+    return 3600 * hour + 60 * minute + second

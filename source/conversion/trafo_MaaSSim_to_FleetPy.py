@@ -36,6 +36,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     :param zone_system_name: zone system name
     :param exp_zone_demand: dataframe with columns: zone_id,  expected_demand
     :param d2d_params: day-to-day params, incl. start and end time of all days
+    :param travel_time_factors: (time-dependent) travel time factors for the network (optional) 
     """
     # 0) convert MaaSSim node id to FleetPy node id
     nodes_df = pd.read_csv(os.path.join(fleetpy_dir, "data", "networks", nw_name, "base", "nodes.csv"))
@@ -132,7 +133,14 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     fp_driver_f = os.path.join(fp_driver_f, fp_driver_f_name)  
     fp_driver_df.to_csv(fp_driver_f, index=False)
 
-    # 3) create scenario input file
+    # 3) create travel time factors file
+    if os.path.exists(os.path.join(dtd_result_dir, "inData_ttfs.csv")):
+        travel_time_factors = os.path.join(dtd_result_dir, "inData_ttfs.csv")
+        ttf_df = pd.DataFrame(travel_time_factors, index=[0])
+        fp_ttf_f = os.path.join(fleetpy_dir, "data", "networks", nw_name, "base", f"{new_wd_scenario_name}.csv")
+        ttf_df.to_csv(fp_ttf_f, index=True)
+
+    # 4) create scenario input file
     start_time = _create_seconds_of_day(d2d_params.t0)
     end_time = start_time + d2d_params.simTime * 3600
     platform_df = pd.read_csv(os.path.join(dtd_result_dir, "inData_platforms.csv"))
@@ -168,6 +176,10 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
             G_FC_FNAME: f"{new_wd_scenario_name}.csv",
             G_FC_TYPE: "perfect_trips",
             G_FC_TR: end_time
+        })
+    if fp_ttf_f:
+        sc_df_list[0].update({
+            G_RA_OP_NW_DYN_F: f"{new_wd_scenario_name}.csv",
         })
     
     sc_df = pd.DataFrame(sc_df_list)

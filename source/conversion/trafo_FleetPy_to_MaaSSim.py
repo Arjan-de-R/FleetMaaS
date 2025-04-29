@@ -122,6 +122,7 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     sim.passengers = inData.passengers.copy()
     sim.requests = inData.requests.copy()
     sim.platforms = inData.platforms.copy()
+    sim.tt_factors = inData.tt_factors.copy()
     sim.inData = inData.copy()
 
     return sim
