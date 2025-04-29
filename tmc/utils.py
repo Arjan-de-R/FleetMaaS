@@ -49,23 +49,6 @@ def deduct_credit_mode(chosen_mode, car_credit, bike_credit, pt_credit, rs_credi
     return credit_cost
 
 
-def establish_buy_quantities(params, value_dict):
-    '''Create database with buy/sell quantities depending on remaining number of days, credit balance and price'''
-
-    # Fill the database with buy/sell values
-    buy_quant_dict = {}
-    for rem_days in value_dict['days']:
-        balance_dict = {}
-        for balance in value_dict['balance']:
-            # Create numpy 2d-array with prices as rows and buy_values as columns
-            util_buy_price_quant = util_buy(params, balance, value_dict['price'], value_dict['quantity'], rem_days)
-            max_indices = np.nanargmax(util_buy_price_quant, axis=1)
-            balance_dict[balance] = value_dict['quantity'][max_indices]
-        buy_quant_dict[rem_days] = balance_dict.copy()
-
-    return buy_quant_dict
-
-
 def buy_table_dimensions(params):
     '''Determine which values are included in the table with quantities depending on price and credit balance'''
     min_price_step = params.tmc.price.get('step', 0.01)
@@ -253,7 +236,7 @@ def order_per_price_regression(pax, params, value_dict, rem_days, expected_price
     def linear_regression_expected_usage():
         '''linear regression but based on expected credit usage'''
         credit_balance_per_day = credit_balance / rem_days
-        quantity = beta_constant + beta_balance * (credit_balance_per_day - pax.expected_credit_usage) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold) + error_term
+        quantity = beta_constant + beta_balance * (credit_balance_per_day - pax.expected_credit_usage_per_price) + beta_price * (value_dict['price'] - expected_price) + beta_days * rem_days + beta_hist_buy * +(ever_bought) + beta_hist_sell * +(ever_sold) + error_term
 
         return quantity
     
@@ -287,7 +270,7 @@ def order_per_price_regression(pax, params, value_dict, rem_days, expected_price
         beta_hist_sell = pax.get('beta_hist_sell', params.tmc.pref_trading.get('beta_hist_sell', 0))
 
         if regression_type == 'linear':
-            if pax.get('expected_credit_usage', None) is None:
+            if pax.get('expected_credit_usage', None) is None and pax.get('expected_credit_usage_per_price', None) is None:
                 quantity = linear_regression()
             else:
                 quantity = linear_regression_expected_usage()
@@ -441,7 +424,7 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
 
     # Determine utility of each mode
     for mode in ['bike', 'car', 'pt', 'rs']:
-        utils[mode] = util_mode(params, passengers, mode_attr[mode], df, credit_price, perc_credit_price=perc_credit_price) # utils if credit balance was not a constraint
+        utils[mode] = util_mode(params, passengers, mode_attr[mode], df, credit_price) # utils if credit balance was not a constraint
         utils[mode] = apply_insufficient_balance(utils[mode], mode_attr[mode]['credits'], df.tmc_balance, mode) # utils considering one's credit balance
         if mode == 'rs':
             utils[mode], chosen_plf = choose_ridehailing_platform(inData, df, utils[mode])
@@ -462,7 +445,7 @@ def mode_preday_plf_choice_tmc(inData, params, **kwargs):
     if params.dem_mgmt == 'tmc':
         # opt out if not enough credit to travel (for any mode)
         probabilities['insuff_credit'] = df.apply(lambda row: (row.U_bike == -math.inf) and (row.U_car == -math.inf) and (row.U_pt == -math.inf) and (row.U_rs == -math.inf), axis=1)
-        probabilities['decis'] = probabilities.apply(lambda row: "not_enough_credit" if row.insuff_credit else row.decis, axis=1)
+        probabilities['decis'] = probabilities.apply(lambda row: "no_mode_available" if row.insuff_credit else row.decis, axis=1)
 
     probabilities['decis'] = probabilities.apply(lambda row: row.decis + '_' + str(row.pref_rs_plf) if row.decis == 'rs' else row.decis, axis=1)
     passengers['mode_day'] = probabilities.decis
@@ -482,9 +465,9 @@ def determine_expected_credit_usage(inData, params, **kwargs):
     passengers = inData.passengers
     df = passengers.copy()
     df['tmc_balance'] = df.tmc_balance if params.dem_mgmt == 'tmc' else 0
-    perc_credit_price = kwargs.get('perc_credit_price', 0)
-    perc_credit_price = 0 if perc_credit_price is None else perc_credit_price
-    credit_price = perc_credit_price
+    credit_price = kwargs.get('credit_price', 0)
+    credit_price = 0 if credit_price is None else credit_price
+    # credit_price = perc_credit_price
     perc_congest_factor = kwargs.get('perc_congest_factor', 1)
     mode_attr = {}
     utils = {}
@@ -494,7 +477,7 @@ def determine_expected_credit_usage(inData, params, **kwargs):
 
     # Determine utility of each mode
     for mode in ['bike', 'car', 'pt', 'rs']:
-        utils[mode] = util_mode(params, passengers, mode_attr[mode], df, credit_price, perc_credit_price=perc_credit_price) # utils if credit balance was not a constraint
+        utils[mode] = util_mode(params, passengers, mode_attr[mode], df, credit_price) # utils if credit balance was not a constraint
         # utils[mode] = apply_insufficient_balance(unconstrained_utils[mode], mode_attr[mode]['credits'], df.tmc_balance, mode) # utils considering one's credit balance
         if mode == 'rs':
             utils[mode], chosen_plf = choose_ridehailing_platform(inData, df, utils[mode])
@@ -516,6 +499,13 @@ def determine_expected_credit_usage(inData, params, **kwargs):
     return expected_credit_usage
 
 
+def determine_expected_credit_usage_per_price(inData, params, value_dict, perc_congest_factor):
+    "determine the expected credit usage based on the probability of choosing each mode for all possible credit prices"
+    expected_usage_dict = np.array([determine_expected_credit_usage(inData, params, credit_price=price, perc_congest_factor=perc_congest_factor) for price in value_dict['price']])
+
+    return expected_usage_dict.T
+
+
 def mode_attributes(params, requests, passengers, inData, perc_congest_factor, mode_attr):
     ''' Determine the attributes (time, cost, etc.) of all modes'''
     prefs = params.evol.travellers.mode_pref
@@ -524,13 +514,14 @@ def mode_attributes(params, requests, passengers, inData, perc_congest_factor, m
     
     # Bike
     mode_attr['bike'] = {}
-    mode_attr['bike']['gtt'] = requests.ttrav_bike.dt.total_seconds() * prefs.bike_multip
+    mode_attr['bike']['gtt'] = requests.ttrav_bike * prefs.bike_multip
     mode_attr['bike']['cost'] = 0
     mode_attr['bike']['credits'] = requests.bike_credit if params.dem_mgmt == 'tmc' else 0
     mode_attr['bike']['constant'] = passengers.ASC_bike
+    mode_attr['bike']['option'] = passengers.bike_option if 'bike_option' in passengers.columns else pd.Series(True, index=mode_attr['bike']['constant'].index)
     # Private car
     mode_attr['car'] = {}
-    car_ivt = requests.ttrav.dt.total_seconds() * perc_congest_factor  # assumed same as RS (solo)
+    car_ivt = requests.ttrav * perc_congest_factor  # assumed same as RS (solo)
     requests['car_park_cost'] = props.car.park_cost
     if props.car.diff_parking:
         requests['dest_center'] = requests.apply(lambda x: inData.nodes.center.loc[x.destination], axis=1)
@@ -544,6 +535,7 @@ def mode_attributes(params, requests, passengers, inData, perc_congest_factor, m
     mode_attr['car']['gtt'] = prefs.access_multip * props.car.access_time + car_ivt # generalised travel time
     mode_attr['car']['constant'] = passengers.ASC_car
     mode_attr['car']['credits'] = requests.car_credit if params.dem_mgmt == 'tmc' else 0
+    mode_attr['car']['option'] = passengers.car_option if 'car_option' in passengers.columns else pd.Series(True, index=mode_attr['car']['constant'].index)
     # Public transport (if included)
     if params.paths.get('PT_trips',False):
         mode_attr['pt'] = {}
@@ -555,6 +547,7 @@ def mode_attributes(params, requests, passengers, inData, perc_congest_factor, m
         mode_attr['pt']['cost'] = requests.PTfare
         mode_attr['pt']['constant'] = passengers.ASC_pt
         mode_attr['pt']['credits'] = requests.pt_credit if params.dem_mgmt == 'tmc' else 0
+        mode_attr['pt']['option'] = passengers.pt_option if 'pt_option' in passengers.columns else pd.Series(True, index=mode_attr['pt']['constant'].index)
     # Ride-hailing
     mode_attr['rs'] = {}
     if params.dem_mgmt == 'cgp':
@@ -569,18 +562,21 @@ def mode_attributes(params, requests, passengers, inData, perc_congest_factor, m
     else:
         mode_attr['rs'] = rs_attr_tmc(inData, params, df.expected_wait * perc_congest_factor, df.expected_ivt * perc_congest_factor, df.expected_km_fare, inData.requests.dist)
     mode_attr['rs']['credits'] = requests.rs_credit.copy() if params.dem_mgmt == 'tmc' else 0
+    mode_attr['rs']['option'] = passengers.rs_option if 'rs_option' in passengers.columns else pd.Series(True, index=mode_attr['rs']['constant'].index)
 
     return mode_attr
 
 
-def util_mode(params, passengers, mode_attr, tmc_balance, credit_price, perc_credit_price=None):
+def util_mode(params, passengers, mode_attr, tmc_balance, credit_price):
     '''Determine the utility of an invidual mode'''
     if params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary":    # convert credit charge to monetary costs
         if params.dem_mgmt != "tmc":
             perc_credit_price = 0
-        mode_util = util_credit_to_cost(params, mode_attr, perc_credit_price, passengers.VoT)
+        mode_util = util_credit_to_cost(params, mode_attr, credit_price, passengers.VoT)
     else: # credit costs perceived separately in utility
         mode_util = util_credit_time(params, mode_attr, credit_price, tmc_balance, passengers.VoT)
+    # Remove option from choice set if not available
+    mode_util = mode_util.where(mode_attr['option'], -math.inf)
 
     return mode_util
 
@@ -729,7 +725,7 @@ def determine_congestion(params, inData, network_name, fp_run_id, fleetpy_dir, f
         plf_1_tt = np.nan_to_num((plf_1_dist / 1000) / plf_1_speed, nan=0.0, posinf=0.0, neginf=0.0)
     plf_1_tt = 0 if np.isnan(plf_1_tt) else plf_1_tt
     car_dist = ((inData.passengers.mode_day == 'car') * inData.requests.dist).sum()
-    car_tt = ((inData.passengers.mode_day == 'car') * inData.requests.ttrav).sum().seconds / 3600
+    car_tt = ((inData.passengers.mode_day == 'car') * inData.requests.ttrav).sum() / 3600
     total_vkt = (plf_0_dist + plf_1_dist + car_dist) / 1000
     total_tt = plf_0_tt + plf_1_tt + car_tt # hour
     avg_number_of_cars_on_road_inhabitant = total_tt / params.simTime

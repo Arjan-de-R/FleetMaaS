@@ -23,7 +23,7 @@ def platform_data_conversion(platform_data):
         return ";".join(platform_list)
 
 
-def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, new_wd_scenario_name,
+def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, nw_name, nw_type, new_wd_scenario_name,
                                      demand_name, d2d_params, zone_system_name=None, exp_zone_demand=None):
     """This function transforms the output files of the day-to-day model for the within-day (FleetPy) model.
 
@@ -53,8 +53,13 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     c_df = pd.merge(rq_df, pax_df, left_on="pax_id", right_index=True)
     f_df = c_df.loc[~(c_df["platforms"].isna())].reset_index()
     if not f_df.empty: # at least one traveller opts for ride-hailing
-        f_df['start'] = f_df['origin'].apply(lambda x: source_to_node_id[x])
-        f_df['end'] = f_df['destination'].apply(lambda x: source_to_node_id[x])
+        if nw_type == "MaaSSim":
+            f_df['start'] = f_df['origin'].apply(lambda x: source_to_node_id[x])
+            f_df['end'] = f_df['destination'].apply(lambda x: source_to_node_id[x])
+        elif nw_type == "FleetPy": # FP network is already loaded in MaaSSim shell
+            f_df = f_df.rename(columns={'origin':'start', 'destination': 'end'})
+        else:
+            raise ValueError
         fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]].copy()
         fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
         fpy_rq_df["platforms"] = fpy_rq_df["platforms"].astype(str).apply(platform_data_conversion)
@@ -111,7 +116,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         platforms = platform_data_conversion(platforms)
         fp_driver_df_list.append({
             "driver_id" : driver_id,
-            "start_node" : source_to_node_id[driver_row["pos"]],  
+            "start_node" : source_to_node_id[driver_row["pos"]] if nw_type == "MaaSSim" else driver_row["pos"],  
             "possible_operators" : platforms, 
             "operating_times" : f"{driver_row['shift_start']};{driver_row['shift_end']}",
             "veh_type" : "default_vehtype" # TODO?

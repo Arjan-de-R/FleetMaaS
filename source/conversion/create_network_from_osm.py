@@ -13,17 +13,38 @@ sys.path.append(os.path.join(dev_p, "FleetPy", "src", "preprocessing", "networks
 from FleetPy.src.preprocessing.networks.network_manipulation import FullNetwork
 from FleetPy.src.preprocessing.networks.create_travel_time_tables import create_travel_time_table
 
-def create_network_from_osm(study_area, study_area_osm_name, network_type, mode_speeds):
+def create_network_from_osm(study_area, study_area_osm_name, network_type, mode_speeds, based_on_car_nw=False):
     """ this function loads the OpenStreetMap (OSM) network and creates fleetpy network files
     output files are stored at fleetpy_dir/data/networks/{network_name}
     
     :param network_name: folder name of network (output folder files will be stored here)
     :param graphml_file: path to the graphml_file"""
 
+    def remove_busways(G):
+        '''remove all edges that are only accessible for buses, as well as corresponding nodes that become isolated'''
+        
+        # Convert edges to a GeoDataFrame
+        nodes, edges = ox.graph_to_gdfs(G)
+
+        # Remove edges with "busway"
+        edges = edges[~edges["highway"].isin(["busway"])]
+
+        # Rebuild the graph from filtered edges and original nodes
+        G_filtered = ox.graph_from_gdfs(nodes, edges)
+
+        # Keep only the largest connected component to remove isolated nodes
+        G_filtered = ox.utils_graph.get_largest_component(G_filtered, strongly=True)
+
+        return G_filtered
+
     # import the graph and keep largest strongly connected component
-    graph = ox.graph_from_place(study_area_osm_name, network_type=network_type)
+    if based_on_car_nw:
+        graph = ox.graph_from_place(study_area_osm_name, network_type="drive")
+    else:
+        graph = ox.graph_from_place(study_area_osm_name, network_type=network_type)
     graph = ox.truncate.largest_component(graph, strongly=True)
-    
+    graph = remove_busways(graph)
+
     # read nodes
     nodes_df_list = []
     node_osmid_to_id = {}
@@ -95,17 +116,6 @@ def create_network_from_osm(study_area, study_area_osm_name, network_type, mode_
         
         if graph.edges[edge].get("geometry"):
             geo = graph.edges[edge].get("geometry")
-        #     geo = geo.split("(")[1]
-        #     geo = geo.split(")")[0]
-        #     coord_list = []
-        #     for x_y_str in geo.split(","):
-        #         xy = x_y_str.split(" ")
-        #         if len(xy) == 2:
-        #             x, y = xy[0], xy[1]
-        #         if len(xy) == 3:
-        #             x, y = xy[1], xy[2]
-        #         coord_list.append( (float(x), float(y)) )
-        #     geo = LineString(coord_list)
         else:
             geo = LineString([o_node["geometry"], d_node["geometry"]])
         
@@ -135,7 +145,8 @@ def create_network_from_osm(study_area, study_area_osm_name, network_type, mode_
 if __name__ == "__main__":
     study_area = "MRDH"
     study_area_osm_name = "Metropolitan Region Rotterdam The Hague"
-    network_type = "drive" #"drive"
+    network_type = "drive" #"bike"
     mode_speeds = {'car_congestion_factor': 0.9, "bike": 20 / 3.6, "walk": 5 / 3.6}
+    custom_road_filter = '["highway"!~"busway|bus_guideway"]["access"!~"bus"]' # remove roads only accessible for buses, TODO: check if it works properly
     
-    create_network_from_osm(study_area, study_area_osm_name, network_type, mode_speeds)
+    create_network_from_osm(study_area, study_area_osm_name, network_type, mode_speeds, based_on_car_nw=True)

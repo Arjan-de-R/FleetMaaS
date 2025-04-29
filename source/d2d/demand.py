@@ -42,7 +42,7 @@ def start_regist_travs(inData, params):
         return array
     
     prob_reg_start = params.evol.travellers.regist.get('prob_start', 1)
-    trav_df['ttrav'] = inData.requests.ttrav.dt.total_seconds()
+    trav_df['ttrav'] = inData.requests.ttrav.copy()
     trav_df['registered'] = (np.random.rand(trav_df.shape[0]) < prob_reg_start) * trav_df.informed
     trav_df['registered'] = trav_df.apply(lambda row: np.full(len(params.platforms.service_types), True) * row.registered, axis=1)
     if not params.evol.travellers.regist.auto:

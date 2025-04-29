@@ -5,12 +5,13 @@ import os
 import sys
 import numpy as np
 import osmnx as ox
+import geopandas as gpd
 
 current_script_path = os.path.abspath(__file__)
 fleetmaas_repo_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_script_path))))
 sys.path.append(fleetmaas_repo_path)
 
-def load_fleetpy_network(area_name, network_type):
+def load_fleetpy_network(area_name, network_type, return_skim=True, presaved_zones=True):
     '''load FleetPy network files, which have been preprocessed from OSM'''
     network_type_extension = "" if network_type == "drive" else "_{}".format(network_type)
     network_path = os.path.join(fleetmaas_repo_path, "FleetPy", "data", "networks", area_name + network_type_extension)
@@ -32,10 +33,8 @@ def load_fleetpy_network(area_name, network_type):
         # Add edges
         for _, row in edges_df.iterrows():
             G.add_edge(row["from_node"], row["to_node"], 
-                    distance=row["distance"], 
+                    length=row["distance"], 
                     travel_time=row["travel_time"])
-            
-        import geopandas as gpd
 
         # Load GeoJSON files
         nodes_gdf = gpd.read_file(os.path.join(network_path, "base", "nodes_all_infos.geojson"))  # Contains exact node positions
@@ -54,17 +53,49 @@ def load_fleetpy_network(area_name, network_type):
         # Assign CRS to the graph
         G.graph['crs'] = crs
 
+        # Load zones
+        if not presaved_zones:
+            zone_path = os.path.join(fleetmaas_repo_path, "source", "preprocessing", "MRDH", "network_zones.geojson")
+            load_and_save_zones(zone_path, nodes_gdf)
+
         return G
 
     def load_skims():
         '''load the precomputed skim matrices (travel time and distance)'''
-        tt_skim = np.load(os.path.join(network_path, "ff", "tables", "nn_fastest_tt.npy"))
-        distance_skim = np.load(os.path.join(network_path, "ff", "tables", "nn_fastest_distance.npy"))
+        tt_skim = np.load(os.path.join(network_path, "ff", "tables", "nn_fastest_tt.npy"), mmap_mode="r")
+        distance_skim = np.load(os.path.join(network_path, "ff", "tables", "nn_fastest_distance.npy"), mmap_mode="r")
         skims = {'tt': tt_skim, 'distance': distance_skim}
 
         return skims
+    
+    def load_and_save_zones(zone_system_path, nodes):
+        '''load zones and assign zone to each node, then save to csv'''
 
-    return load_graph(), load_skims()
+        # Load the postcode zones as GeoDataFrame
+        zones = gpd.read_file(zone_system_path)  # Make sure it has a polygon geometry and a postcode/zone column
+
+        # Ensure both are in the same coordinate reference system
+        nodes = nodes.to_crs(zones.crs)
+
+        # Optional: drop nodes without geometry (edge case)
+        nodes = nodes.dropna(subset=["geometry"])
+
+        # Spatial join: assign each node to the zone polygon it falls into
+        # `how="left"` keeps all nodes, even if they don't match a zone (zone will be NaN)
+        nodes_with_zones = gpd.sjoin(nodes, zones, how="left", predicate="within")
+
+        # Save to CSV: node ID and zone ID
+        output = nodes_with_zones[["pc4_code"]].copy()
+        output["node_id"] = nodes_with_zones.index
+        output = output[["node_id", "pc4_code"]]  # Rearrange columns
+
+        # Save to CSV
+        output.to_csv("nodes_with_zones.csv", index=False)
+    
+    if return_skim:
+        return load_graph(), load_skims()
+    else:
+        return load_graph(), None
 
 
 def coordinate_conversion(rd_x, rd_y):
