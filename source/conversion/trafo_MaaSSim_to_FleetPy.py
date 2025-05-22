@@ -5,10 +5,6 @@ import pandas as pd
 from FleetPy.src.misc.globals import *
 
 
-def _create_seconds_of_day(dt_str):
-    hour, minute, second =  [int(x) for x in dt_str.split(" ")[1].split(":")]
-    return 3600 * hour + 60 * minute + second
-
 def platform_data_conversion(platform_data):
     """This function converts the platform data from the MaaSSim format to the FleetPy format.
 
@@ -62,7 +58,8 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         else:
             raise ValueError
         fpy_rq_df = f_df[["rq_id", "treq", "start", "end", "platforms", "VoT"]].copy()
-        fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
+        # fpy_rq_df["rq_time"] = fpy_rq_df.apply(lambda x: _create_seconds_of_day(x["treq"]), axis=1)
+        fpy_rq_df.rename({"treq": "rq_time"}, axis=1, inplace=True)
         fpy_rq_df["platforms"] = fpy_rq_df["platforms"].astype(str).apply(platform_data_conversion)
     else:
         fpy_rq_df = pd.DataFrame(columns=["rq_id", "rq_time", "treq", "start", "end", "platforms", "VoT"]).copy()
@@ -85,7 +82,7 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
         raise NotImplementedError
 
     # 1b) create demand forecast file
-    start_time = _create_seconds_of_day(d2d_params.t0)
+    start_time = d2d_params.t0
     end_time = start_time + d2d_params.simTime * 3600
     if zone_system_name is not None and exp_zone_demand is not None:
         # valid throughout the time interval
@@ -136,12 +133,15 @@ def transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_
     # 3) create travel time factors file
     if os.path.exists(os.path.join(dtd_result_dir, "inData_ttfs.csv")):
         travel_time_factors = os.path.join(dtd_result_dir, "inData_ttfs.csv")
-        ttf_df = pd.DataFrame(travel_time_factors, index=[0])
-        fp_ttf_f = os.path.join(fleetpy_dir, "data", "networks", nw_name, "base", f"{new_wd_scenario_name}.csv")
+        ttf_df = pd.read_csv(travel_time_factors, index_col=0)
+        fp_congest_f = os.path.join(fleetpy_dir, "data", "networks", nw_name, "congestion")
+        if not os.path.isdir(fp_congest_f):
+            os.mkdir(fp_congest_f)
+        fp_ttf_f = os.path.join(fp_congest_f, f"{new_wd_scenario_name}.csv")
         ttf_df.to_csv(fp_ttf_f, index=True)
 
     # 4) create scenario input file
-    start_time = _create_seconds_of_day(d2d_params.t0)
+    start_time = d2d_params.t0
     end_time = start_time + d2d_params.simTime * 3600
     platform_df = pd.read_csv(os.path.join(dtd_result_dir, "inData_platforms.csv"))
     nr_platforms = platform_df.shape[0]

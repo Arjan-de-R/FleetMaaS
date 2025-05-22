@@ -24,9 +24,8 @@ sys.path.append(FLEETPY_DIR)
 # sys.path.append(MAASSIM_DIR)
 
 from MaaSSim.src_MaaSSim.maassim import Simulator
-# from MaaSSim.src_MaaSSim.shared import prep_shared_rides
 from MaaSSim.src_MaaSSim.utils import get_config, load_G, generate_demand, generate_vehicles, initialize_df, empty_series, \
-    slice_space, read_vehicle_positions
+    slice_space, read_vehicle_positions, create_seconds_of_day
 from scipy.optimize import brute
 import logging
 import re
@@ -36,7 +35,6 @@ from MaaSSim.src_MaaSSim.d2d_supply import *
 from MaaSSim.src_MaaSSim.decisions import dummy_False
 from source.d2d.reproduce_MS_simulator import repl_sim_object
 from tmc.utils import *
-import zipfile
 import json
 import geopandas
 from FleetPy.run_examples import run_scenarios
@@ -129,10 +127,14 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         from MaaSSim.src_MaaSSim.data_structures import structures
         inData = structures.copy()  # fresh data
     if params is None:
-            params = get_config(config, root_path = kwargs.get('root_path'))  # load from .json file
+        params = get_config(config, root_path = kwargs.get('root_path'))  # load from .json file
     if kwargs.get('make_main_path',False):
         from MaaSSim.src_MaaSSim.utils import make_config_paths
         params = make_config_paths(params, main = kwargs.get('make_main_path',False), rel = True)
+
+    # Set random seeds used for setting up simulation (not for the simulation itself)
+    np.random.seed(0)
+    random.seed(0)
 
     if params.paths.get('requests', False):
         inData = read_requests_csv(inData, params) # read request file
@@ -165,10 +167,6 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData, centre_nodes = prep_inData_nodes_centre(inData, params)  # determine which nodes are in center
     if 'through_center' not in inData.requests.columns:
         inData.requests['through_center'] = False
-
-    # Set random seeds used throughout the simulation
-    np.random.seed(params.repl_id)
-    random.seed(params.repl_id)
 
     # Set properties of platform(s)
     inData.platforms = pd.concat([inData.platforms,pd.DataFrame(columns=['base_fare','comm_rate','min_fare','match_obj','max_wait_time','max_rel_detour'])])
@@ -216,11 +214,8 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.passengers['money_balance'] = 0
         inData.passengers['tot_credit_bought'] = 0
         inData.passengers['tot_credit_sold'] = 0
-        # Establish possible buy/sell actions, i.e. what are possible credit prices, balance values and buy quantities
+        # Establish possible buy/sell actions, i.e. what are possible credit prices, balance values and buy quantities (if specified)
         buy_table_dims = buy_table_dimensions(params)
-        # Initialise remaining days in which credit can be spent
-        credit_validity = params.tmc.get('duration', 25)
-        remaining_days = credit_validity
     
     # Prepare schedule for the within-day simulator
     fleetpy_dir = os.path.join(path, 'FleetPy')
@@ -248,7 +243,23 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         inData.nodes["zone_id"] = inData.nodes.apply(lambda row: get_init_zone_id(row, zones), axis=1)
         # Add zone id to passenger df
         inData.passengers['zone_id'] = inData.passengers.apply(lambda x: inData.nodes.zone_id.loc[x.pos], axis=1)
-    # Expected share of (perceived) demand per zone (for the first day) -- we assume that they consider (and know) all travel demand in the network
+
+    # Load ride-hailing zones
+    rh_zone_f = os.path.join(fleetpy_dir, "data", "zones", zone_name, network_name, "rh_zones.csv")
+    municipality_zone_f = os.path.join(fleetpy_dir, "data", "zones", zone_name, "general_information.csv")
+    if os.path.isfile(rh_zone_f) and os.path.isfile(municipality_zone_f):
+        rh_zones = pd.read_csv(rh_zone_f, index_col=False)
+        df_municipality_zone = pd.read_csv(municipality_zone_f, index_col=False)
+        # Step 1: Merge zone_id → municipality into df_travellers
+        inData.passengers = inData.passengers.merge(df_municipality_zone[['zone_id', 'municipality']], on='zone_id', how='left')
+        # Step 2: Merge municipality → rh_zone
+        inData.passengers = inData.passengers.merge(
+            rh_zones, on='municipality', how='left'
+        )
+        inData.passengers.drop(columns=['municipality'], inplace=True)
+        rh_zone_list = inData.passengers['rh_zone'].unique()
+
+    # # Expected share of (perceived) demand per zone (for the first day) -- we assume that they consider (and know) all travel demand in the network
     all_zone_ids = zones['zone_id'].unique()
     perc_demand = inData.passengers['zone_id'].value_counts().reindex(all_zone_ids, fill_value=0).sort_index() * (1/inData.passengers.shape[0])
     perc_demand.name = "requests"
@@ -284,7 +295,7 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
     df_req = df_req.rename(columns={'ttrav':'ttrav_car', 'waitingTime': 'PT_waitingTime', 'transitTime': 'PT_ivTime'})
     if 'haver_dist' in inData.requests.columns:
         df_req.loc[:, 'haver_dist'] = inData.requests['haver_dist']
-    df_pax_cols = [x for x in ['VoT','ASC_rs','ASC_pool','ASC_car','ASC_pt','ASC_bike','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming','bike_option', 'car_option'] if x in inData.passengers.columns]
+    df_pax_cols = [x for x in ['VoT','ASC_rs','ASC_pool','ASC_car','ASC_pt','ASC_bike','U_car','U_pt','U_bike', 'mode_without_rs', 'multihoming','bike_option', 'car_option', 'zone_id', 'rh_zone'] if x in inData.passengers.columns]
     df_pax = inData.passengers[df_pax_cols]
     pd.concat([df_req, df_pax], axis=1).to_csv(os.path.join(result_path,'1_pax-properties.csv'))
     inData.vehicles[['pos', 'res_wage', 'multihoming']].to_csv(os.path.join(result_path,'2_driver-properties.csv'))
@@ -295,18 +306,25 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
         all_pax_df[['origin','destination','treq','dist','ttrav','VoT','ASC_rs','ASC_pool','U_car','U_pt','U_bike', 'mode_choice']].to_csv(os.path.join(result_path,'4_out-filter-pax.csv'))
         del all_pax, all_req, all_pax_df
 
-    # Starting (perceived) credit price
-    perc_credit_price = params.evol.travellers.tmc.get('perc_credit_price_start', None)
-
-    # Starting perception of congestion
-    perc_congest_factor = params.congestion.get('start_perc', 1)
+    # Initialise credit price
+    credit_price = None
 
     # Starting congestion levels
-    ttf_update_interval = params.congestion.get('update_interval', params.simTime) * 3600
-    t0 = create_seconds_of_day(params.t0)
-    inData.tt_factors = pd.DataFrame(index=range(t0, t0 + params.simTime*3600, ttf_update_interval), columns=['travel_time_factor'])
-    inData.tt_factors['travel_time_factor'] = params.congestion.get('start_ttf', 1)
-    inData.tt_factors.index.name = 'simulation_time'
+    params.t0 = create_seconds_of_day(params.t0)
+    if params.paths.get('ttfs', False):
+        inData.tt_factors = pd.read_csv(params.paths.ttfs, index_col=False)
+        inData.tt_factors['simulation_time'] = inData.tt_factors['simulation_time'] + params.t0
+        inData.tt_factors.set_index('simulation_time', inplace=True)
+        inData.tt_factors['travel_time_factor'] = inData.tt_factors['travel_time_factor'].astype(float)
+    else:
+        ttf_update_interval = int(params.congestion.get('update_interval', params.simTime) * 3600)
+        inData.tt_factors = pd.DataFrame(index=range(params.t0, params.t0 + params.simTime*3600, ttf_update_interval), columns=['travel_time_factor'])
+        inData.tt_factors['travel_time_factor'] = params.congestion.get('start_ttf', 1)
+        inData.tt_factors['background_traffic_share'] = 1 / inData.tt_factors.shape[0]
+        inData.tt_factors.index.name = 'simulation_time'
+
+    # Update expected travel times for car and ride-hailing based on congestion levels
+    inData.passengers['expected_ttf'] = inData.requests.apply(lambda row: compute_weighted_avg_ttf(row['treq'], row['ttrav'], inData.tt_factors, params), axis=1)
 
     # Initialise license plate rationing
     if params.dem_mgmt == 'lpr':
@@ -314,160 +332,169 @@ def simulate(config="data/config.json", inData=None, params=None, path = None, *
 
     # Initialise convergence
     d2d_conv = pd.DataFrame()
+    conv_dict = dict()
+    conv_dict['expected_modal_split'] = pd.DataFrame()
+    mode_choice_converged = False
+    mode_choice_iter = 0
 
-    # Day-to-day simulator
-    for day in range(params.get('nD', 1)):  # run iterations
+    # Set random seeds used throughout the simulation
+    np.random.seed(params.repl_id)
+    random.seed(params.repl_id)
 
+    # Simulator
+    while mode_choice_iter < params.convergence.get('max_iter_mode_choice', 100):
+        print(f"--- Mode Choice Iteration {mode_choice_iter} ---")
+        transport_model_converged = False
+        transport_iter = 0
+    
         #----- Pre-day -----#
         section_start = time.time()
 
         # Credit trading
         if params.dem_mgmt == 'tmc':
-            if remaining_days == 0: # new credits are assigned
-                inData.passengers['tmc_balance'] = determine_starting_balance(inData, params, credits_per_day)
-                remaining_days = credit_validity
-            if params.tmc.pref_trading.get("reference", False) == "perceived_need":
-                # inData.passengers['expected_credit_usage'] = determine_expected_credit_usage(inData, params, perc_credit_price=perc_credit_price, perc_congest_factor=perc_congest_factor)
-                inData.passengers['expected_credit_usage_per_price'] = list(determine_expected_credit_usage_per_price(inData, params, buy_table_dims, perc_congest_factor))
-            print(f"Section 1 -- expected credit usage -- completed in {time.time() - section_start:.4f} seconds")
+            credit_price, market_orders, probabilities, gtt_chosen_mode, expected_attr = price_and_orders(inData, params, possible_prices=buy_table_dims['price'], prev_price=credit_price)
+            # First, determine convergence (expected modal splits per time period)
+            expected_modal_splits = expected_modal_split_per_time_period(inData, params, probabilities)
+            conv_dict['expected_modal_split'] = store_expected_modal_split(expected_modal_splits, mode_choice_iter, conv_dict['expected_modal_split'])
+            # Next, we have to check for each time period if all market shares have not changed by more than x% (moving average)
+            mode_choice_converged = determine_mode_choice_convergence(conv_dict['expected_modal_split'], params)
+            if mode_choice_converged:
+                break
+            inData.passengers['mode_day'] = probabilities['decis']
+            inData.requests['chosen_mode_perc_gtt'] = gtt_chosen_mode
+            print(f"Section 1 -- determination market price and mode choice -- completed in {time.time() - section_start:.4f} seconds")
             section_start = time.time()
-            inData.passengers['order_per_price'] = inData.passengers.apply(lambda row: order_per_price(row, params, buy_table_dims, remaining_days, None), axis=1)
-            credit_price, satisfied_orders, denied_orders = trading(inData, buy_table_dims)
+            satisfied_orders, denied_orders = market_transactions(market_orders)
             print(f"Section 2 -- ordering and trading -- completed in {time.time() - section_start:.4f} seconds")
             section_start = time.time()
             # Update credit and monetary balance
-            inData.passengers = update_balances(inData, satisfied_orders, denied_orders, credit_price)
+            inData.passengers = update_balances(inData, satisfied_orders, denied_orders)
             # Save trading market indicators
-            save_tmc_market_indicators(inData, result_path, day, credit_price, satisfied_orders, denied_orders)
-            remaining_days -= 1
+            save_tmc_market_indicators(inData, result_path, mode_choice_iter, transport_iter, credit_price, satisfied_orders, denied_orders)
             print(f"Section 3 -- updating balance and saving market indicators -- completed in {time.time() - section_start:.4f} seconds")
             section_start = time.time()
 
-        # Mode choice
-        if params.evol.travellers.plf_choice == 'preday':
-            if params.dem_mgmt:
-                if params.dem_mgmt == "tmc" and params.evol.travellers.mode_pref.get('credit_percept', "monetary") == "monetary": # use monetary perception of credit in mode utility
-                    perc_credit_price = learn_credit_price(credit_price, perc_credit_price, remaining_days, params)
-                    inData.passengers, inData.requests = mode_preday_plf_choice_tmc(inData, params, perc_credit_price=perc_credit_price, perc_congest_factor=perc_congest_factor, day=day, credit_price=credit_price)
-                else: # separate credit perception in mode utility
-                    inData.passengers, inData.requests = mode_preday_plf_choice_tmc(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
-            else:
-                inData.passengers = mode_preday_plf_choice(inData, params, credit_price=credit_price, perc_congest_factor=perc_congest_factor, day=day)
-            if params.dem_mgmt == 'tmc':
-                credit_deduction = pd.concat([inData.passengers, inData.requests], axis=1).apply(lambda row: deduct_credit_mode(row.mode_day, row.car_credit, row.bike_credit, row.pt_credit, row.rs_credit), axis=1)
-                inData.passengers.tmc_balance = inData.passengers.tmc_balance - credit_deduction # TODO: get money back when denied service? maybe not. we also don't model denied service in PT
-        else:
-            inData.passengers = mode_preday(inData, params) # mode choice
-
-        print(f"Section 4 -- actual mode choice -- completed in {time.time() - section_start:.4f} seconds")
-        section_start = time.time()
-
         #----- Within-day simulator -----#
-        if not params.paths.get('fleetpy_config', False): # run MaaSSim
-            sim.make_and_run(run_id=day)  # prepare and SIM
-            sim.output()  # calc results
-            sim.last_res = sim.res[day].copy() # create a copy of the results - saved later
-            del sim.res[day]
-        else: # run FleetPy
-            # Pre-day work choice
-            if not params.evol.drivers.particip.auto:
-                inData.vehicles = work_preday(inData.vehicles, params)
-            else:
-                inData.vehicles['ptcp'] = inData.vehicles['registered'].copy()
+        # Pre-day work choice
+        if not params.evol.drivers.particip.auto:
+            inData.vehicles = work_preday(inData.vehicles, params)
+        else:
+            inData.vehicles = determine_centralised_rh_fleet(inData, params)
 
-            # Determine which platform(s) agents can use - using right FleetPy coding
-            df_veh = inData.vehicles.copy()
-            df_veh['ptcp_plf_index'] = df_veh.apply(lambda row: row.ptcp.nonzero()[0], axis=1)
-            df_veh['ptcp_plf_index_string'] = df_veh.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.ptcp_plf_index, flags=['zerosize_ok'])), axis=1)
-            inData.vehicles.platform = df_veh['ptcp_plf_index_string']
-            df_pax = inData.passengers.copy()
-            if params.evol.travellers.plf_choice == 'preday':
-                df_pax['chosen_plf_index_string'] = df_pax.apply(lambda row: row.mode_day.split("_")[-1] + "" if row.mode_day.startswith('rs_') else "", axis=1)
-            else:
-                df_pax['chosen_plf_index'] = df_pax.apply(lambda row: np.where((row.mode_day == 'rs') * row.registered)[0], axis=1)
-                df_pax['chosen_plf_index_string'] = df_pax.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.chosen_plf_index, flags=['zerosize_ok'])), axis=1)
-            inData.passengers['platforms'] = df_pax.chosen_plf_index_string
+        # Determine which platform(s) agents can use - using right FleetPy coding
+        df_veh = inData.vehicles.copy()
+        df_veh['ptcp_plf_index'] = df_veh.apply(lambda row: row.ptcp.nonzero()[0], axis=1)
+        df_veh['ptcp_plf_index_string'] = df_veh.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.ptcp_plf_index, flags=['zerosize_ok'])), axis=1)
+        inData.vehicles.platform = df_veh['ptcp_plf_index_string']
+        df_pax = inData.passengers.copy()
+        if params.evol.travellers.plf_choice == 'preday':
+            df_pax['chosen_plf_index_string'] = df_pax.apply(lambda row: row.mode_day.split("_")[-1] + "" if row.mode_day.startswith('rs_') else "", axis=1)
+        else:
+            df_pax['chosen_plf_index'] = df_pax.apply(lambda row: np.where((row.mode_day == 'rs') * row.registered)[0], axis=1)
+            df_pax['chosen_plf_index_string'] = df_pax.apply(lambda row: ';'.join(str(plf) for plf in np.nditer(row.chosen_plf_index, flags=['zerosize_ok'])), axis=1)
+        inData.passengers['platforms'] = df_pax.chosen_plf_index_string
 
-            # Generate input csv's for FleetPy
-            dtd_result_dir = os.path.join(path, 'temp_res','{}'.format(scn_name))
-            if not os.path.exists(dtd_result_dir):
-                if not os.path.exists(os.path.join(path,'temp_res')):
-                    os.mkdir(os.path.join(path,'temp_res'))
-                os.mkdir(dtd_result_dir)
-            inData.requests.to_csv(os.path.join(dtd_result_dir,'inData_requests.csv'))
-            inData.passengers.to_csv(os.path.join(dtd_result_dir,'inData_passengers.csv')) 
-            inData.vehicles.to_csv(os.path.join(dtd_result_dir,'inData_vehicles.csv')) 
-            inData.platforms.to_csv(os.path.join(dtd_result_dir,'inData_platforms.csv'))
-            inData.tt_factors.to_csv(os.path.join(dtd_result_dir,'inData_ttfs.csv'))  
+        # Generate input csv's for FleetPy
+        dtd_result_dir = os.path.join(path, 'temp_res','{}'.format(scn_name))
+        if not os.path.exists(dtd_result_dir):
+            if not os.path.exists(os.path.join(path,'temp_res')):
+                os.mkdir(os.path.join(path,'temp_res'))
+            os.mkdir(dtd_result_dir)
+        inData.requests.to_csv(os.path.join(dtd_result_dir,'inData_requests.csv'))
+        inData.passengers.to_csv(os.path.join(dtd_result_dir,'inData_passengers.csv')) 
+        inData.vehicles.to_csv(os.path.join(dtd_result_dir,'inData_vehicles.csv')) 
+        inData.platforms.to_csv(os.path.join(dtd_result_dir,'inData_platforms.csv'))
+
+        while not transport_model_converged and transport_iter < params.convergence.get('max_iter_transport', 20):
+            print(f"- Transport model iteration {transport_iter} -")
+            inData.tt_factors.to_csv(os.path.join(dtd_result_dir,'inData_ttfs.csv'))
+            save_ttfs_to_d2d_csv(inData, result_path, mode_choice_iter, transport_iter)
 
             # FleetPy init: conversion from MaaSSim data structure
-            fp_run_id = scn_name + '-day-{}'.format(day) # id in FleetPy
+            fp_run_id = scn_name + '-mc-{}-tm-{}'.format(mode_choice_iter, transport_iter) # id in FleetPy
             transform_dtd_output_to_wd_input(dtd_result_dir, fleetpy_dir, fleetpy_study_name, network_name, nw_type, fp_run_id, demand_name, params, zone_system_name=zone_name, exp_zone_demand=perc_demand)
-            print(f"Section 5 -- FleetPy initialisation -- completed in {time.time() - section_start:.4f} seconds")
+            print(f"Section 4 -- FleetPy initialisation -- completed in {time.time() - section_start:.4f} seconds")
             section_start = time.time()
 
             # Run FleetPy model
             scn_file = os.path.join(fleetpy_dir, "studies", fleetpy_study_name, "scenarios", f"{fp_run_id}.csv")
             run_scenarios(constant_config_file, scn_file)
-            print(f"Section 6 -- running FleetPy -- completed in {time.time() - section_start:.4f} seconds")
+            print(f"Section 5 -- running FleetPy -- completed in {time.time() - section_start:.4f} seconds")
             section_start = time.time()
 
             # FleetPy results: convert back to MaaSSim structure (simulator object) #TODO: o.a. indicators per platform, expected in-vehicle time, multi-homing vs single-homing
             sim = transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_run_id, inData)
-            perc_demand = learn_demand(inData, params, zones, perc_demand)
-            print(f"Section 7 -- converting FleetPy results -- completed in {time.time() - section_start:.4f} seconds")
+            print(f"Section 6 -- converting FleetPy results -- completed in {time.time() - section_start:.4f} seconds")
             section_start = time.time()
 
-        #----- Post-day -----#
+            #----- Post-day -----#
+            ## Determine new travel time factors (congestion levels)
+            ttfs = determine_congestion(params, inData, network_name, fp_run_id, fleetpy_dir, fleetpy_study_name)
+            inData.tt_factors['travel_time_factor'] = ttfs['new_travel_time_factor'].copy()
+            # Determine whether congestion factors have sufficiently converged
+            transport_model_converged = ttf_convergence_check(params, ttfs)
+            if not transport_model_converged:
+                transport_iter += 1
+            print(f"Section 7 -- determine road congestion and convergence -- completed in {time.time() - section_start:.4f} seconds")
+
+        if transport_model_converged:
+            # Determine key KPIs
+            drivers_summary = update_d2d_drivers(sim=sim, params=params)
+            travs_summary = update_d2d_travellers(sim=sim, params=params, pax=inData.passengers)
             
-        # Determine road congestion (in retrospect) --> travel time factor (for ride-hailing and private car)
-            ## First determine vkt and congestion factor
-            day_congest_factor, car_dist, plf_0_dist, plf_1_dist = determine_congestion(params, inData, network_name, fp_run_id, fleetpy_dir, fleetpy_study_name)
-            ## Determine expected delay factor (weighing past experiences)
-            perc_congest_factor = params.congestion.get('weight_last_exp', 0.2) * day_congest_factor + (1 - params.congestion.get('weight_last_exp', 0.2)) * perc_congest_factor
-            print(f"Section 8 -- determine road congestion -- completed in {time.time() - section_start:.4f} seconds")
+            # Update work experience of job seekers
+            exp_df = update_work_exp(inData, drivers_summary)   # number of days work experience
+            inData.vehicles.work_exp = exp_df.work_exp
+
+            # Supply-side diffusion of platform information
+            inData.vehicles.informed = wom_driver(inData, params=params)   # which job seekers are informed about ride-hailing
+            
+            # (De-)registration decisions
+            inData.vehicles = platform_regist_driver(inData, drivers_summary, params=params)
+            inData.vehicles.pos = fixed_supply.pos
+
+            # Determine congestion charge paid
+            if params.dem_mgmt == 'cgp':
+                inData.passengers['paid_cgp'] = determine_congestion_charge(inData, params)
+
+            # Learning ride-hailing kpi's for travellers
+            inData.passengers = learn_wd_kpis(inData, travs_summary, params, mode_choice_iter, transport_iter, result_path, rh_zone_list)
+            perc_demand = learn_demand(inData, params, zones, perc_demand)
+
             section_start = time.time()
 
-        ## Ridesourcing
-        # Determine key KPIs
-        drivers_summary = update_d2d_drivers(sim=sim, params=params)
-        travs_summary = update_d2d_travellers(sim=sim, params=params, pax=inData.passengers)
-        
-        # Update work experience of job seekers
-        exp_df = update_work_exp(inData, drivers_summary)   # number of days work experience
-        inData.vehicles.work_exp = exp_df.work_exp
+            # Store KPIs of iteration
+            travs_summary, warm_pax_df, warm_ttf_df = filter_warm_period(travs_summary, inData, params) # TODO: also apply warm-up filter for drivers (needs to be done in FleetPy?)
+            dem_df, sup_df = d2d_summary_day(inData, drivers_summary, travs_summary, warm_pax_df)
+            dem_df.to_csv(os.path.join(result_path,'mc_{}_tm_{}_travs.csv'.format(mode_choice_iter, transport_iter)))
+            sup_df.to_csv(os.path.join(result_path,'mc_{}_tm_{}_drivers.csv'.format(mode_choice_iter, transport_iter)))
 
-        # Supply-side diffusion of platform information
-        inData.vehicles.informed = wom_driver(inData, params=params)   # which job seekers are informed about ride-hailing
-        
-        # (De-)registration decisions
-        inData.vehicles = platform_regist_driver(inData, drivers_summary, params=params)
-        inData.vehicles.pos = fixed_supply.pos
+            ### Determine and store day's key KPIs, and determine convergence
+            fp_result_dir = os.path.join(fleetpy_dir, 'studies', fleetpy_study_name, 'results', fp_run_id) # where are the results stored
+            congest_indic = determine_vkt(inData, params, fp_result_dir)
+            d2d_conv = save_market_shares(inData, params, result_path, mode_choice_iter, travs_summary, drivers_summary, d2d_conv, congest_indic)
+            save_random_states(result_path)
 
-        # Demand-side diffusion of platform information
-        res_inf_trav = wom_trav(inData, travs_summary, params=params)
-        inData.passengers.informed = res_inf_trav.informed
-        inData = platform_regist_trav(inData, travs_summary, params=params)
+            del drivers_summary, travs_summary, dem_df, sup_df, warm_ttf_df, warm_pax_df
+            print(f"Section 8 -- post-processing day -- completed in {time.time() - section_start:.4f} seconds")
 
-        # Determine congestion charge paid
-        if params.dem_mgmt == 'cgp':
-            inData.passengers['paid_cgp'] = determine_congestion_charge(inData, params)
+        mode_choice_iter += 1    
 
-        # Store KPIs of day
-        dem_df, sup_df = d2d_summary_day(inData, drivers_summary, travs_summary)
-        dem_df.to_csv(os.path.join(result_path,'day_{}_travs.csv'.format(day)))
-        sup_df.to_csv(os.path.join(result_path,'day_{}_drivers.csv'.format(day)))
+    # Save expected traveller attributes and probabilities
+    expected_attr_df = pd.DataFrame(expected_attr)
+    expected_attr_df.to_csv(os.path.join(result_path,'conv_trav_expected_attr.csv'))
+    probabilities.drop(columns=['decis', 'chosen_rs_plf']).to_csv(os.path.join(result_path,'conv_trav_mode_probabilities.csv'))
 
-        ### Determine and store day's key KPIs, and determine convergence
-        congest_indic = {'xp_delay': day_congest_factor, 'perc_delay': perc_congest_factor, 'vkt_car': car_dist/1000, 'vkt_rs_0': plf_0_dist/1000, 'vkt_rs_1': plf_1_dist/1000}
-        d2d_conv = save_market_shares(inData, params, result_path, day, travs_summary, drivers_summary, d2d_conv, congest_indic)
-        if not params.dem_mgmt:
-            if determine_convergence(inData, d2d_conv, params, scn_name, day):
-                break
-        save_random_states(result_path)
-
-        del drivers_summary, travs_summary, dem_df, sup_df
-        print(f"Section 9 -- post-procesing day -- completed in {time.time() - section_start:.4f} seconds")
+    # Final output
+    if mode_choice_converged:
+        print("Simulation converged successfully.")
+        # Save convergence status in output folder
+        with open(os.path.join(result_path, 'convergence_status.txt'), 'w') as f:
+            f.write("Simulation converged successfully.")
+    else:
+        print("Simulation reached max iterations without full convergence.")
+        with open(os.path.join(result_path, 'convergence_status.txt'), 'w') as f:
+            f.write("Simulation reached max mode choice iterations without full convergence.")
 
     return sim
 

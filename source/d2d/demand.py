@@ -62,6 +62,6 @@ def learn_demand(inData, params, zones, perc_demand):
     day_demand = inData.passengers[inData.passengers.mode_day == 'rs']
     reqs_per_zone = day_demand.zone_id.value_counts()
     reqs_per_zone = reqs_per_zone.reindex(zones.zone_id.values, fill_value=0)
-    perc_demand['requests'] = (1-params.evol.travellers.kappa) * perc_demand['requests'] + params.evol.travellers.kappa * reqs_per_zone
+    perc_demand['requests'] = (1-params.evol.drivers.get('kappa', 0.2)) * perc_demand['requests'] + params.evol.drivers.get('kappa', 0.2) * reqs_per_zone
 
     return perc_demand

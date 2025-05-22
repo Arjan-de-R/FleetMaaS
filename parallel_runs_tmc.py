@@ -18,10 +18,8 @@ params.platforms.service_types = ['solo', 'pool']  # list with 'solo' or 'pool' 
 # params.evol.travellers.inform.start_pool_detour = 0.25
 ### OPTIONAL: ADD / CHANGE MODEL PARAMETERS
 params.nP = 5000 # travellers
-params.nV = 100 # drivers
+params.nV = 100 # max. number of drivers
 params.dem_mgmt = 'tmc' # 'None', 'tmc', 'lpr', 'cgp'
-params.tmc.duration = 30  # days
-params.nD = 1 * params.tmc.duration # max. number of days
 params.tmc.allocated_credits_per_day = 10 # credit/day
 params.evol.travellers.vot_determination = "from_income"
 params.evol.travellers.baseline_log_VoT = -2.75      # Baseline log VoT
@@ -30,16 +28,35 @@ params.evol.travellers.random_var_income = 0.5
 params.tmc.pref_trading.method = "regression"
 params.tmc.pref_trading.beta_constant = 0
 params.tmc.pref_trading.beta_balance = -1
-params.tmc.pref_trading.beta_price = -30
+params.tmc.pref_trading.beta_price = 0
 params.tmc.pref_trading.beta_days = 0
 # params.tmc.pref_trading.sd_beta_constant = 0.3
-params.tmc.pref_trading.sd_beta_balance = 0.3
-params.tmc.pref_trading.sd_beta_price = 0.3
+params.tmc.pref_trading.sd_beta_balance = 0
+params.tmc.pref_trading.sd_beta_price = 0
 params.tmc.pref_trading.sd_error_term = 2
 params.tmc.pref_trading.reference = "perceived_need"
 params.evol.travellers.tmc.perc_credit_price_start = 0.25
 params.network_type = "FleetPy"
 params.speeds.bike = 15/3.6  # used to overwrite ttrav_bike
+params.congestion.update_interval = 0.5
+params.congestion.uncongested_background_travel_time = 100000 
+params.convergence.ttf = 0.01
+params.convergence.moving_average_window = 5
+params.convergence.stable_iters = 3
+params.convergence.error_modal_split = 0.002
+params.evol.travellers.start_wait = 120
+params.evol.drivers.number_of_drivers_per_trav_solo = 6
+params.evol.drivers.number_of_drivers_per_trav_pool = 4
+params.convergence.start_pool_detour = 0.2
+params.evol.travellers.min_kappa = 0.2
+params.city = "Delft"
+params.total_road_dist = 100
+params.paths.requests = "MaaSSim/data/demand/Delft/requests.csv"
+params.paths.passengers = "MaaSSim/data/demand/Delft/passengers.csv"
+params.paths.PT_trips = "MaaSSim/data/demand/Delft/req_PT.csv"
+params.paths.ttfs = "MaaSSim/data/congestion/Delft/ttfs.csv"
+params.warmup = 1800
+params.cooldown = 1800
 
 # params.tmc.beta_monetary = -0.2
 # params.tmc.max_balance = 1000
@@ -64,12 +81,6 @@ params.speeds.bike = 15/3.6  # used to overwrite ttrav_bike
 ## Start time
 params.t0 = pd.Timestamp(2025, 4, 1, 7)
 
-# Convergence
-# params.convergence.req_steady_days = 5 # X days in a row a change in perceived income of x-day moving average below the convergence factor
-# # params.convergence.factor = 0.002
-# params.convergence.first_moving_avg = 3
-# params.convergence.second_moving_avg = 3
-
 def generate_paths(params):
     # generates graph paths based on city name
     params.paths.G = os.path.join('MaaSSim','data','graphs','{}.graphml'.format(params.city.split(",")[0]))
@@ -80,9 +91,7 @@ def sample_space():
     # analysis of behavioural parameters
     space = DotMap()
     space.service_types = [['solo', 'pool']]
-    # space.dem_mh_share = [0.5]
-    # space.sup_mh_share = [0.5]
-    space.repl_id = [1]
+    space.repl_id = [0]
     return space
 
 def determine_n_threads(search_space):

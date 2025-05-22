@@ -41,3 +41,24 @@ def save_market_shares(inData, params, result_path, day, travs_summary, drivers_
         conv_indic.to_csv(os.path.join(result_path,'5_conv-indicators.csv'), mode='a', index=False, header=False)
 
     return d2d_conv
+
+
+def filter_warm_period(travs_summary, inData, params):
+    '''Filter out (select) the warm period from the demand data'''
+    # Filter travellers between warmup and cooldown period
+    pax_copy_df = inData.passengers.copy()
+    ttf_df = inData.tt_factors.copy()
+    warm_time = params.t0 + params.get('warmup', 0)
+    cooldown_time = params.t0 + params.simTime * 3600 - params.get('cooldown', 0)
+    travs_summary = travs_summary[(inData.requests['treq'] >= warm_time) & (inData.requests['treq'] <= cooldown_time)].copy()
+    pax_copy_df = pax_copy_df[(inData.requests['treq'] >= warm_time) & (inData.requests['treq'] <= cooldown_time)].copy()
+
+    ttf_df = ttf_df.sort_index().copy()
+    ttf_df['start_time'] = ttf_df.index
+    ttf_df['end_time'] = ttf_df['start_time'].shift(-1)
+    # Fill end time for the last row, e.g. using total simulation time
+    ttf_df['end_time'] = ttf_df['end_time'].fillna(params.t0 + params.simTime * 3600)
+    # --- Filter periods fully within (t_min, t_max) ---
+    ttf_df = ttf_df[(ttf_df['start_time'] >= warm_time) & (ttf_df['end_time'] <= cooldown_time)].copy()
+
+    return travs_summary, pax_copy_df, ttf_df

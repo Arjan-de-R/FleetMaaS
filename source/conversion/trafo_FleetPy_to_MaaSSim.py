@@ -111,7 +111,11 @@ def transform_wd_output_to_d2d_input(sim, fleetpy_dir, fleetpy_study_name, fp_ru
     no_ptcp_df =  no_ptcp_df.astype(dtype=dtype_no_ptcp)
     no_ptcp_df['driver_id'] = noptcp_drivers
     no_ptcp_df = no_ptcp_df.set_index('driver_id')
-    veh_exp = pd.concat([veh_exp,no_ptcp_df]).sort_index()
+    dataframes_to_concat = [df for df in [veh_exp, no_ptcp_df] if not df.empty]
+    if dataframes_to_concat:
+        veh_exp = pd.concat(dataframes_to_concat).sort_index()
+    else:
+        veh_exp = pd.DataFrame()  # Handle the case where all DataFrames are empty
     veh_exp.index.name = 'veh'
     veh_exp['OUT'] = inData.vehicles.apply(lambda row: ~row.ptcp, axis=1)
     veh_exp['FORCED_OUT'] = False # TODO: implement registration cap to work with multiple platforms
